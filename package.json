@@ -1,0 +1,14 @@
+{
+  "name": "beasiswa-in",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "beasiswa.in: agen pencari beasiswa (prototipe demo).",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0"
+  }
+}
