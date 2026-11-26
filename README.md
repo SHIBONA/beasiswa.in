@@ -69,3 +69,5 @@ npm audit
 ```
 
 Suite browser membutuhkan Node.js 22.22.3+ pada lini 22, atau 24.8+. Tes browser memakai profil fiktif dan server demo dengan penyimpanan terpisah di `.e2e/`. Jalankan dengan `BEASISWA_TEST_MOBILE=1` untuk viewport 375 × 812. Tes API memakai proses server dan penyimpanan sementara sendiri.
+
+Workflow **Verification** menjalankan audit dependensi, tes unit dan HTTP, serta tes Chromium desktop dan seluler saat ada pull request atau push ke `main`. Pengujian di GitHub Actions memakai mode demo tanpa API key.
