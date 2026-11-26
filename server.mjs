@@ -1,7 +1,7 @@
 // Demo server for PRD 6.4 "Cari Beasiswa". One demo member, JSON file storage, no framework.
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { open, readFile, rename, unlink } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentMode, runSearch } from "./agent.mjs";
@@ -59,8 +59,21 @@ let saving = Promise.resolve();
 function persist() {
   const snapshot = JSON.stringify(db, null, 2);
   const pending = saving.then(async () => {
-    await writeFile(`${DATA_PATH}.tmp`, snapshot, { mode: 0o600 });
-    await rename(`${DATA_PATH}.tmp`, DATA_PATH);
+    const tempPath = `${DATA_PATH}.tmp-${randomUUID()}`;
+    const file = await open(tempPath, "wx", 0o600);
+    try {
+      try {
+        await file.writeFile(snapshot);
+      } finally {
+        await file.close();
+      }
+      await rename(tempPath, DATA_PATH);
+    } catch (error) {
+      await unlink(tempPath).catch((cleanupError) => {
+        if (cleanupError.code !== "ENOENT") console.error("Gagal membersihkan berkas sementara.");
+      });
+      throw error;
+    }
   });
   saving = pending.catch(() => console.error("Gagal menyimpan data lokal."));
   return pending;

@@ -3,7 +3,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -166,6 +166,16 @@ test("member flow: CV → profile → search → results → coach → before/af
   assert.equal(history.length, 2);
   assert.equal((await call(`/searches/${fail.body.search_id}`, "DELETE")).status, 200);
   assert.equal((await call("/searches")).body.searches.length, 1);
+});
+
+test("persisting a profile leaves legacy temporary files alone", async () => {
+  const legacy = join(dir, "data.json.tmp");
+  writeFileSync(legacy, "legacy fixture");
+  const { body: { profile } } = await call("/profile");
+  assert.equal((await call("/profile", "PUT", profile)).status, 200);
+  assert.equal(readFileSync(legacy, "utf8"), "legacy fixture");
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "data.json"), "utf8")).profile, profile);
+  assert.equal(readdirSync(dir).some((file) => file.startsWith("data.json.tmp-")), false);
 });
 
 test("deleting successful history cannot restore quota, including after restart", async () => {
