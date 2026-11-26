@@ -71,6 +71,7 @@ test("provider URLs use public host names and official labels match domain bound
   assert.equal(isOfficial("https://lpdp.kemenkeu.go.id.example.com/application"), false);
   assert.equal(isOfficial("https://chevening-information.example.com/application"), false);
   assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details").href, "https://example.com/Scholarships?id=1");
+  assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details", { keepFragment: true }).href, "https://example.com/Scholarships?id=1#details");
 });
 
 test("malformed provider items are skipped or reduced to bounded facts", () => {

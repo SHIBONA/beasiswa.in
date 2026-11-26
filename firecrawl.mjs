@@ -1,7 +1,8 @@
 // Firecrawl client (search + scrape with JSON extraction). Needs FIRECRAWL_API_KEY.
 // Every quote the extractor returns is checked against the page markdown before it is shown.
-import { isIP } from "node:net";
 import { CATALOG } from "./catalog.mjs";
+import { publicWebUrl } from "./public/web-url.mjs";
+export { publicWebUrl };
 
 const API = "https://api.firecrawl.dev/v2";
 const TIMEOUT_MS = 90_000;
@@ -12,21 +13,6 @@ export const hostOf = (url) => { try { return new URL(url).hostname.replace(/^ww
 const hostMatches = (host, domain) => host === domain || host.endsWith(`.${domain}`);
 const ORGANISERS = new Set([...CATALOG.map((s) => hostOf(s.url)), "daad.de", "europa.eu", "fulbrightprogram.org", "emb-japan.go.jp"]);
 const INSTITUTION_DOMAIN = /\.(?:gov|edu|(?:gov|govt|edu|ac|go)\.[a-z]{2})$/;
-const NON_PUBLIC_SUFFIX = /\.(?:localhost|local|internal|test|invalid|onion|home|lan|arpa)$/;
-
-export function publicWebUrl(input) {
-  if (typeof input !== "string" || input.length > 2048) return null;
-  try {
-    const url = new URL(input);
-    const host = url.hostname;
-    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port) return null;
-    if (!/^(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*$/.test(host) || isIP(host) || NON_PUBLIC_SUFFIX.test(host)) return null;
-    url.hash = "";
-    return url;
-  } catch {
-    return null;
-  }
-}
 
 export const isBlocked = (url) => !publicWebUrl(url) || BLOCKED_HOSTS.some((d) => hostMatches(hostOf(url), d));
 export const isOfficial = (url) => {

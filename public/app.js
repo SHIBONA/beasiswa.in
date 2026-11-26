@@ -1,3 +1,5 @@
+import { publicWebUrl } from "./web-url.mjs";
+
 const DISCLAIMER = "Hasil dikumpulkan AI dari web dan bisa keliru. Selalu cek syarat & deadline di situs resmi penyelenggara.";
 const POLL_MS = 1200;
 const METHOD_NOTE = `<details class="card method"><summary><b>ℹ️ Cara skor dihitung dan seberapa valid</b></summary><ul>
@@ -11,13 +13,12 @@ let pollTimer = null;
 let meta = {};
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const safeUrl = (u) => {
-  try {
-    const url = new URL(u);
-    if (["https:", "http:"].includes(url.protocol) && !url.username && !url.password) return url.href;
-  } catch { /* Invalid link from a provider or an older search. */ }
-  return "#";
-};
+function sourceLink(input, label, className = "") {
+  const url = publicWebUrl(input, { keepFragment: true });
+  return url
+    ? `<a class="${className}" href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`
+    : `<span class="hint">${esc(label)} (tautan tidak tersedia)</span>`;
+}
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : "Tidak tertulis");
 const fmtTime = (iso) => new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
 const STATUS = { queued: "Antre", running: "Berjalan", succeeded: "Selesai", failed: "Gagal" };
@@ -260,7 +261,7 @@ function othersBlock(others) {
   if (!others?.length) return "";
   return `<details class="card"><summary><b>🔗 Kandidat lain dari pencarian (${others.length})</b> <span class="hint">· belum dibaca agen, tanpa skor</span></summary>
     <ul class="refs" style="margin-top:10px">${others.map((x) => `<li>
-      <a href="${esc(safeUrl(x.url))}" target="_blank" rel="noopener noreferrer">${esc(x.title || hostOf(x.url))}</a> <span class="hint">${esc(hostOf(x.url))}</span>
+      ${sourceLink(x.url, x.title || hostOf(x.url) || "Sumber")} <span class="hint">${esc(hostOf(x.url))}</span>
       ${x.description ? `<div class="hint">${esc(x.description.slice(0, 200))}</div>` : ""}
     </li>`).join("")}</ul></details>`;
 }
@@ -286,7 +287,7 @@ function resultCard(r, saved) {
         ${awardeeBlock(r)}
         <div class="actions">
           ${r.program ? `<a class="btn" href="#/sesuaikan/${encodeURIComponent(r.id)}">🛠 Sesuaikan CV</a>` : ""}
-          <a class="btn ghost" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">${r.program?.official === false ? "Buka sumber ↗" : "Buka sumber resmi ↗"}</a>
+          ${sourceLink(r.url, r.program?.official === false ? "Buka sumber ↗" : "Buka sumber resmi ↗", "btn ghost")}
           <button class="star ${saved ? "on" : ""}" data-id="${esc(r.id)}" data-saved="${saved}">${saved ? "★ Tersimpan" : "☆ Simpan"}</button>
         </div>
       </div>
@@ -348,7 +349,7 @@ function awardeeBlock(r) {
   if (!r.awardee_refs?.length) return "";
   return `<div class="panel"><h4>🎓 Pengalaman awardee <span class="hint">· artikel publik hasil pencarian, belum diperiksa tim</span></h4>
     <ul class="refs">${r.awardee_refs.map((x) => `<li>
-      <a href="${esc(safeUrl(x.url))}" target="_blank" rel="noopener noreferrer">${esc(x.title || hostOf(x.url))}</a> <span class="hint">${esc(hostOf(x.url))}</span>
+      ${sourceLink(x.url, x.title || hostOf(x.url) || "Sumber")} <span class="hint">${esc(hostOf(x.url))}</span>
       ${x.description ? `<div class="hint">${esc(x.description.slice(0, 200))}</div>` : ""}
     </li>`).join("")}</ul></div>`;
 }
@@ -388,7 +389,7 @@ function bindStars() {
 }
 
 // ---------- Sesuaikan CV: rewording options re-scored before/after, hard gaps, growth plan ----------
-const linkHtml = (l) => `<li>${l.url ? `<a href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener noreferrer">${esc(l.title)} ↗</a>` : `<b>${esc(l.title)}</b>`} <span class="hint">${esc(l.note)}</span></li>`;
+const linkHtml = (l) => `<li>${l.url ? sourceLink(l.url, `${l.title} ↗`) : `<b>${esc(l.title)}</b>`} <span class="hint">${esc(l.note)}</span></li>`;
 const deltaHtml = (d) => (d > 0 ? `<span class="up">+${d}</span>` : d < 0 ? `<span class="down">${d}</span>` : `<span class="hint">0</span>`);
 
 function compareHtml(p) {
@@ -427,7 +428,7 @@ async function viewCoach(id) {
   app.innerHTML = `
     <p><a href="#/hasil/${encodeURIComponent(rid.split(":")[0])}">← Kembali ke hasil</a></p>
     <h1>Sesuaikan CV untuk ${esc(c.program.name)}</h1>
-    <p class="sub">Skor sekarang <b>${c.before}</b>. Potensi jika semua saran kalimat dipakai: <b>${c.best}</b> (${c.best > c.before ? `naik ${c.best - c.before} poin` : "tidak berubah"}). Program menilai: ${esc(c.program.values.join(", ") || "-")}. <a href="${esc(safeUrl(c.program.url))}" target="_blank" rel="noopener noreferrer">Situs resmi ↗</a></p>
+    <p class="sub">Skor sekarang <b>${c.before}</b>. Potensi jika semua saran kalimat dipakai: <b>${c.best}</b> (${c.best > c.before ? `naik ${c.best - c.before} poin` : "tidak berubah"}). Program menilai: ${esc(c.program.values.join(", ") || "-")}. ${sourceLink(c.program.url, "Buka sumber ↗")}</p>
 
     <section class="card">
       <h3>✍️ Bisa ditingkatkan lewat CV</h3>

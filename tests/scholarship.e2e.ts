@@ -75,4 +75,21 @@ describe('Cari Beasiswa', () => {
 
     await expect(failed).toHaveCount(0);
   });
+
+  test('disables a private source URL from older saved data', async ({ app, screen, browser }) => {
+    await browser.route('**/api/saved', (route) => route.fulfill({ json: {
+      saved: [
+        { id: 'old-private', name: 'Sumber lama', url: 'http://127.0.0.1/document', score: 72 },
+        { id: 'old-public', name: 'Sumber publik', url: 'https://example.com/program#syarat', score: 81 },
+      ],
+    } }));
+
+    await app.open('/#/tersimpan');
+
+    const privateCard = browser.locator('article').filter({ hasText: 'Sumber lama' });
+    const publicCard = browser.locator('article').filter({ hasText: 'Sumber publik' });
+    await expect(privateCard.getByText(/tautan tidak tersedia/)).toBeVisible();
+    await expect(privateCard.getByRole('link')).toHaveCount(0);
+    await expect(publicCard.getByRole('link')).toHaveAttribute('href', 'https://example.com/program#syarat');
+  });
 });

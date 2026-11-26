@@ -29,6 +29,7 @@ const STATIC_FILES = new Map([
   ["/", [join(PUBLIC_DIR, "index.html"), "text/html; charset=utf-8"]],
   ["/index.html", [join(PUBLIC_DIR, "index.html"), "text/html; charset=utf-8"]],
   ["/app.js", [join(PUBLIC_DIR, "app.js"), JS]],
+  ["/web-url.mjs", [join(PUBLIC_DIR, "web-url.mjs"), JS]],
   ["/pdf/pdf.mjs", [join(ROOT, "node_modules/pdfjs-dist/build/pdf.mjs"), JS]],
   ["/pdf/pdf.worker.mjs", [join(ROOT, "node_modules/pdfjs-dist/build/pdf.worker.mjs"), JS]],
 ]);
