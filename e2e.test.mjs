@@ -2,13 +2,16 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { once } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PORT = 3990 + Math.floor(Math.random() * 9);
-const BASE = `http://localhost:${PORT}/api`;
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+const BASE = `${ORIGIN}/api`;
 const dir = mkdtempSync(join(tmpdir(), "beasiswa-e2e-"));
 let server;
 
@@ -25,18 +28,31 @@ const waitDone = async (id) => {
   throw new Error("search did not finish");
 };
 
-before(async () => {
+async function startServer(env = {}) {
   server = spawn(process.execPath, [fileURLToPath(new URL("./server.mjs", import.meta.url))], {
-    env: { ...process.env, PORT: String(PORT), DATA_FILE: join(dir, "data.json"), DEMO_STEP_MS: "5", FIRECRAWL_API_KEY: "", ANTHROPIC_API_KEY: "" },
+    env: { ...process.env, PORT: String(PORT), DATA_FILE: join(dir, "data.json"), DEMO_STEP_MS: "5", FIRECRAWL_API_KEY: "", ANTHROPIC_API_KEY: "", ...env },
     stdio: "ignore",
   });
   for (let i = 0; i < 50; i++) {
-    try { if ((await fetch(`${BASE}/meta`)).ok) return; } catch { /* not up yet */ }
+    try { if ((await fetch(`${BASE}/meta`, { headers: { Connection: "close" } })).ok) return; } catch { /* not up yet */ }
+    if (server.exitCode !== null) throw new Error(`server exited: ${server.exitCode}`);
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error("server did not start");
+}
+
+async function stopServer() {
+  if (!server || server.exitCode !== null || server.signalCode !== null) return;
+  const exited = once(server, "exit");
+  server.kill();
+  await exited;
+}
+
+before(() => startServer());
+after(async () => {
+  await stopServer();
+  rmSync(dir, { recursive: true, force: true });
 });
-after(() => { server?.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 const CV = `Raka Aditya Pratama · raka.contoh@example.com · 0812-3456-7890
 S1 Teknik Elektro · Semester 7 · IPK 3.62 / 4.00
@@ -44,6 +60,58 @@ Juara 2 Lomba Karya Tulis Ilmiah Nasional Energi Terbarukan 2025
 Asisten Laboratorium Sistem Tenaga Listrik 2024
 Bahasa Inggris: IELTS Academic 6.0 (2026)
 Teknis: IoT, embedded system, machine learning dasar`;
+
+test("local HTTP security headers protect the page and private API", async () => {
+  const page = await fetch(ORIGIN);
+  assert.equal(page.status, 200);
+  const csp = page.headers.get("content-security-policy");
+  assert.match(csp, /script-src 'self'(?:;|$)/);
+  assert.match(csp, /worker-src 'self'/);
+  assert.match(csp, /frame-ancestors 'none'/);
+  assert.equal(page.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+  const profile = await fetch(BASE + "/profile");
+  assert.equal(profile.headers.get("cross-origin-resource-policy"), "same-origin");
+  assert.equal(profile.headers.get("cache-control"), "no-store");
+});
+
+test("browser-origin restrictions block foreign requests and keep normal access", async () => {
+  for (const headers of [
+    { Origin: "https://example.test" },
+    { Origin: "null" },
+    { "Sec-Fetch-Site": "same-site" },
+    { "Sec-Fetch-Site": "cross-site" },
+  ]) {
+    const result = await fetch(BASE + "/profile", { headers });
+    assert.equal(result.status, 403);
+    assert.equal(result.headers.get("access-control-allow-origin"), null);
+  }
+  assert.equal((await fetch(BASE + "/profile", { headers: { Origin: ORIGIN, "Sec-Fetch-Site": "same-origin" } })).status, 200);
+  const unexpectedHost = await new Promise((resolve, reject) => {
+    const req = request(BASE + "/profile", { headers: { Host: `example.test:${PORT}` } }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+  assert.equal(unexpectedHost, 403);
+});
+
+test("API rejects malformed bodies, oversized input and undefined routes", async () => {
+  assert.equal((await fetch(BASE + "/profile", { method: "PUT", body: "{}" })).status, 415);
+  for (const body of ["null", "[]", "true", "{invalid"]) {
+    assert.equal((await fetch(BASE + "/profile", { method: "PUT", body, headers: { "Content-Type": "application/json" } })).status, 400);
+  }
+  assert.equal((await call("/profile", "PUT", { prodi: "x".repeat(20_001) })).status, 413);
+  assert.equal((await call("/cv/parse", "POST", { text: "x".repeat(30_001) })).status, 413);
+  assert.equal((await call("/saved/%", "DELETE")).status, 400);
+  assert.equal((await call("/profile/extra")).status, 404);
+  assert.equal((await call("/cv/parse/extra", "POST", { text: CV })).status, 404);
+  assert.equal((await fetch(ORIGIN + "/data.json")).status, 404);
+  assert.equal((await fetch(ORIGIN + "/app.js", { method: "POST" })).status, 405);
+  assert.equal((await fetch(ORIGIN + "/app.js", { method: "HEAD" })).status, 200);
+});
 
 test("member flow: CV → profile → search → results → coach → before/after → save → quota → failure → history", async () => {
   assert.equal((await call("/meta")).body.mode, "demo");
@@ -98,4 +166,29 @@ test("member flow: CV → profile → search → results → coach → before/af
   assert.equal(history.length, 2);
   assert.equal((await call(`/searches/${fail.body.search_id}`, "DELETE")).status, 200);
   assert.equal((await call("/searches")).body.searches.length, 1);
+});
+
+test("deleting successful history cannot restore quota, including after restart", async () => {
+  const { body: { searches: [previous] } } = await call("/searches");
+  const used = (await call("/meta")).body.quota_left;
+  assert.equal((await call(`/searches/${previous.id}`, "DELETE")).status, 200);
+  assert.equal((await call("/meta")).body.quota_left, used);
+  await stopServer();
+  await startServer();
+  assert.equal((await call("/meta")).body.quota_left, used);
+  assert.equal((await call("/searches")).body.searches.length, 0);
+});
+
+test("external attempt limit is enforced independently of successful searches", async () => {
+  const { body: { today } } = await call("/meta");
+  const { body: { profile } } = await call("/profile");
+  const full = join(dir, "provider-limit.json");
+  writeFileSync(full, JSON.stringify({ profile, searches: [], saved: [], providerAttempts: { day: today, count: 10 } }));
+  await stopServer();
+  await startServer({ DATA_FILE: full, FIRECRAWL_API_KEY: "test-fixture-never-used" });
+  assert.equal((await call("/meta")).body.quota_left, 5);
+  const blocked = await call("/searches", "POST", {});
+  assert.equal(blocked.status, 429);
+  assert.match(blocked.body.error, /Batas percobaan/);
+  assert.equal((await call("/searches")).body.searches.length, 0);
 });

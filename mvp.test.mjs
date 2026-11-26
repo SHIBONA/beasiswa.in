@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classifyAchievement, matchCatalog, rankScholarships } from "./catalog.mjs";
-import { collectSeenUrls, parseFinalJson, searchProfile, validateResults } from "./agent.mjs";
+import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "./agent.mjs";
 import { checkQuota, validateProfile } from "./server.mjs";
 import { extractCvHeuristic, redact } from "./cv.mjs";
 import { pickPages, toEntries } from "./agent.mjs";
-import { verifyQuote } from "./firecrawl.mjs";
+import { isOfficial, publicWebUrl, verifyQuote } from "./firecrawl.mjs";
 import { coachFor, previewFor } from "./coach.mjs";
 import { CATALOG } from "./catalog.mjs";
 
@@ -50,6 +50,80 @@ test("pickPages drops duplicates and social media, official sites first", () => 
   assert.deepEqual(pages.map((p) => p.url), ["https://lpdp.kemenkeu.go.id/a/", "https://www.chevening.org/scholarships", "https://blog.example.com/beasiswa"]);
 });
 
+test("discovery sends only recognised scholarship categories to providers", () => {
+  const privateDetails = { ...profile, prodi: "Teknik Elektro NAMA_FIKTIF", bidang_minat: "IoT rahasia@example.test",
+    negara_tujuan: "Hongkong, Alamat Privat", prestasi: "Prestasi pribadi", ipk: 3.57, skor_bahasa: 8.5 };
+  const notes = "Jepang, telepon 081234567890 dan alamat pribadi";
+  assert.deepEqual(discoveryPreferences(privateDetails, notes), {
+    level: "S2", countries: ["hong kong", "jepang"], fields: ["teknik", "elektro", "iot"], fullFunding: true,
+  });
+  const queries = firecrawlQueries(privateDetails, notes, "2027");
+  assert.equal(queries.length, 5);
+  assert.match(queries[0], /hong kong/);
+  assert.match(queries[1], /jepang/);
+  assert.doesNotMatch(queries.join(" "), /NAMA_FIKTIF|rahasia|privat|pribadi|081234567890|3\.57|8\.5/i);
+});
+
+test("provider URLs use public host names and official labels match domain boundaries", () => {
+  for (const url of ["file:///document.pdf", "http://127.0.0.1", "https://portal.local", "https://[::1]",
+    "https://user:secret@example.com", "https://example.com:8443"]) assert.equal(publicWebUrl(url), null);
+  assert.equal(isOfficial("https://scholarships.manchester.ac.uk/application"), true);
+  assert.equal(isOfficial("https://lpdp.kemenkeu.go.id.example.com/application"), false);
+  assert.equal(isOfficial("https://chevening-information.example.com/application"), false);
+  assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details").href, "https://example.com/Scholarships?id=1");
+});
+
+test("malformed provider items are skipped or reduced to bounded facts", () => {
+  const [result] = toEntries({ page_type: "daftar", scholarships: [null, { name: {} }, {
+    name: "Program Contoh", levels: "S2", countries: [null, "Jepang"], funding: {},
+    min_gpa: 5, ielts: "Infinity", deadline: "2027-02-31", requirements: "a".repeat(1000),
+    selection_criteria: [null, { criterion: {}, quote: true }],
+  }] }, PAGE, "https://example.com/program");
+  assert.equal(result.requirements.length, 300);
+  assert.deepEqual(result.levels, []);
+  assert.deepEqual(result.countries, ["jepang"]);
+  assert.deepEqual(result.evidence.kriteria, []);
+  assert.equal(result.min_gpa, undefined);
+  assert.equal(result.ielts, undefined);
+  assert.equal(result.deadline, "");
+  assert.equal(result.funding, "Tidak tertulis");
+});
+
+test("Firecrawl workflow uses bounded discovery inputs and retains only source-backed quotes", async (t) => {
+  const providerKey = process.env.FIRECRAWL_API_KEY;
+  process.env.FIRECRAWL_API_KEY = "test-fixture-never-used";
+  t.after(() => {
+    if (providerKey === undefined) delete process.env.FIRECRAWL_API_KEY;
+    else process.env.FIRECRAWL_API_KEY = providerKey;
+  });
+  const requests = [];
+  const programUrl = "https://lpdp.kemenkeu.go.id/program";
+  const quote = "Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00";
+  t.mock.method(globalThis, "fetch", async (input, options) => {
+    const url = new URL(input);
+    assert.equal(url.origin, "https://api.firecrawl.dev");
+    assert.equal(options.redirect, "error");
+    const body = JSON.parse(options.body);
+    requests.push({ path: url.pathname, body });
+    if (url.pathname === "/v2/search") {
+      return Response.json({ success: true, data: { web: [{ url: programUrl }, { url: "https://localhost" }] } });
+    }
+    assert.equal(body.url, programUrl);
+    return Response.json({ success: true, data: { markdown: PAGE, metadata: { url: programUrl }, json: {
+      page_type: "program", scholarships: [{ name: "Program LPDP", countries: ["jepang"], levels: ["S2"],
+        min_gpa: 3, min_gpa_quote: quote, ielts: 6.5, ielts_quote: "IELTS 7.0 wajib" }],
+    } } });
+  });
+
+  const notes = "Jepang, catatan-pribadi@example.com";
+  const output = await runSearch(profile, notes, () => {}, "2026-11-26");
+  assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
+  assert.equal(output.results.length, 1);
+  assert.equal(output.results[0].program.evidence.ipk, quote);
+  assert.equal(output.results[0].program.evidence.bahasa, "");
+  assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
+});
+
 test("insight explains each selection stage with the member's strongest achievement", () => {
   const { results } = matchCatalog({ ...profile, prestasi: "Kepala Divisi Teknis, Himpunan Mahasiswa Elektro" }, "", "2026-11-26");
   const lpdp = results.find((r) => r.name.includes("LPDP"));
@@ -85,7 +159,7 @@ test("CV semester falls back to intake year", () => {
   assert.equal(extractCvHeuristic("S1 Teknik Elektro, angkatan 2024", "2026-11-26").semester, 5);
 });
 
-test("redact hides email, phone and NIM before text reaches the AI", () => {
+test("redact removes email, phone and NIM from CV suggestions", () => {
   const out = redact(CV_TEXT);
   assert.ok(!out.includes("raka.contoh@example.com"));
   assert.ok(!out.includes("0812-3456-7890"));
@@ -135,7 +209,8 @@ test("live results keep only URLs the agent saw; past deadline is labelled", () 
   ];
   const raw = parseFinalJson(`Berikut hasilnya: {"results":[
     {"name":"LPDP","url":"https://lpdp.kemenkeu.go.id","levels":["S2"],"countries":["jepang"],"funding":"Penuh","deadline":"2027-03-31","min_gpa":3.0,"ielts":6.5,"values":["riset","bukan-enum"]},
-    {"name":"Chevening","url":"https://www.chevening.org/scholarships/","levels":["S2"],"countries":["inggris"],"funding":"Penuh","deadline":"2026-01-01"},
+    {"name":"Chevening","url":"https://www.chevening.org/scholarships","levels":["S2"],"countries":["inggris"],"funding":"Penuh","deadline":"2026-01-01"},
+    {"name":"Jalur berbeda","url":"https://www.chevening.org/Scholarships","levels":["S2"]},
     {"name":"Karangan","url":"https://beasiswa-palsu.example","levels":["S2"],"deadline":"2027-01-01"}]}`);
   const verified = validateResults(raw, collectSeenUrls(content));
   assert.deepEqual(verified.map((r) => r.name), ["LPDP", "Chevening"]);

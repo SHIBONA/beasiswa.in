@@ -1,16 +1,39 @@
 // Firecrawl client (search + scrape with JSON extraction). Needs FIRECRAWL_API_KEY.
 // Every quote the extractor returns is checked against the page markdown before it is shown.
+import { isIP } from "node:net";
+import { CATALOG } from "./catalog.mjs";
+
 const API = "https://api.firecrawl.dev/v2";
 const TIMEOUT_MS = 90_000;
 const MIN_QUOTE_CHARS = 12;
 
 const BLOCKED_HOSTS = ["facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com", "threads.net", "youtube.com", "linkedin.com", "scribd.com", "reddit.com", "quora.com", "pinterest.com"];
-const OFFICIAL_HOST = /\.(go\.id|ac\.id|gov|edu|or\.id)$|\.(gov|edu|ac|go)\.[a-z]{2}$|lpdp|chevening|daad|fulbright|aminef|studyinkorea|campuschina|nesoindonesia|australiaawards|nzscholarships|erasmus|europa\.eu|si\.se|stipendiumhungaricum|turkiyeburslari|icdf|a-star|ugc\.edu\.hk|emb-japan|mext/;
-
 export const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const hostMatches = (host, domain) => host === domain || host.endsWith(`.${domain}`);
-export const isBlocked = (url) => !/^https?:/.test(url) || BLOCKED_HOSTS.some((d) => hostMatches(hostOf(url), d));
-export const isOfficial = (url) => OFFICIAL_HOST.test(hostOf(url));
+const ORGANISERS = new Set([...CATALOG.map((s) => hostOf(s.url)), "daad.de", "europa.eu", "fulbrightprogram.org", "emb-japan.go.jp"]);
+const INSTITUTION_DOMAIN = /\.(?:gov|edu|(?:gov|govt|edu|ac|go)\.[a-z]{2})$/;
+const NON_PUBLIC_SUFFIX = /\.(?:localhost|local|internal|test|invalid|onion|home|lan|arpa)$/;
+
+export function publicWebUrl(input) {
+  if (typeof input !== "string" || input.length > 2048) return null;
+  try {
+    const url = new URL(input);
+    const host = url.hostname;
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port) return null;
+    if (!/^(?:[a-z0-9-]+\.)+[a-z][a-z0-9-]*$/.test(host) || isIP(host) || NON_PUBLIC_SUFFIX.test(host)) return null;
+    url.hash = "";
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+export const isBlocked = (url) => !publicWebUrl(url) || BLOCKED_HOSTS.some((d) => hostMatches(hostOf(url), d));
+export const isOfficial = (url) => {
+  if (!publicWebUrl(url)) return false;
+  const host = hostOf(url);
+  return INSTITUTION_DOMAIN.test(host) || [...ORGANISERS].some((domain) => hostMatches(host, domain));
+};
 
 async function call(path, body) {
   const response = await fetch(`${API}${path}`, {
@@ -18,23 +41,58 @@ async function call(path, body) {
     headers: { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
+    redirect: "error",
   });
-  if (response.status === 402) throw new Error("Kredit Firecrawl habis. Isi ulang kredit atau pakai mode demo.");
-  if (response.status === 429) throw new Error("Firecrawl membatasi permintaan (rate limit). Coba lagi 1 menit lagi.");
-  if (response.status === 401) throw new Error("API key Firecrawl tidak valid.");
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data.success) throw new Error(`Firecrawl ${response.status}: ${data.error ?? "permintaan gagal"}`);
+  const knownError = {
+    402: "Kredit Firecrawl habis. Isi ulang kredit atau pakai mode demo.",
+    429: "Firecrawl membatasi permintaan. Coba lagi dalam satu menit.",
+    401: "API key Firecrawl tidak valid.",
+  }[response.status];
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw Object.assign(new Error(`Firecrawl HTTP ${response.status}`), { publicMessage: knownError });
+  }
+  const data = await readResponse(response);
+  if (data?.success !== true) throw new Error("Respons Firecrawl tidak valid.");
   return data;
+}
+
+async function readResponse(response) {
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 4_000_000) {
+        await reader.cancel();
+        throw new Error("Respons Firecrawl terlalu besar.");
+      }
+      chunks.push(value);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export async function search(query, limit) {
   const { data } = await call("/search", { query, limit, location: "Indonesia" });
-  return (data?.web ?? []).map((r) => ({ url: r.url, title: r.title ?? "", description: r.description ?? "" }));
+  return Array.isArray(data?.web) ? data.web.slice(0, limit).filter((r) => !isBlocked(r?.url)).map((r) => ({
+    url: publicWebUrl(r.url).href,
+    title: typeof r.title === "string" ? r.title.slice(0, 240) : "",
+    description: typeof r.description === "string" ? r.description.slice(0, 400) : "",
+  })) : [];
 }
 
 export async function scrapeJson(url, schema, prompt) {
+  if (isBlocked(url)) throw new Error("URL sumber tidak diizinkan.");
   const { data } = await call("/scrape", { url, onlyMainContent: true, formats: ["markdown", { type: "json", schema, prompt }] });
-  return { json: data?.json ?? null, markdown: data?.markdown ?? "", finalUrl: data?.metadata?.url ?? url };
+  const finalUrl = data?.metadata?.url ?? data?.metadata?.sourceURL ?? url;
+  if (isBlocked(finalUrl)) throw new Error("URL akhir sumber tidak diizinkan.");
+  return { json: data?.json ?? null, markdown: typeof data?.markdown === "string" ? data.markdown : "", finalUrl: publicWebUrl(finalUrl).href };
 }
 
 // Runs tasks with a small concurrency cap; keeps result order; a failed task yields { error }.
@@ -55,6 +113,7 @@ const clean = (text) => String(text ?? "").normalize("NFKC").toLowerCase().repla
 
 // A quote counts only if it is really on the page (anti-hallucination, PRD risk 11).
 export function verifyQuote(quote, markdown) {
+  if (typeof quote !== "string" || quote.length > 1000) return "";
   const q = clean(quote);
   return q.length >= MIN_QUOTE_CHARS && clean(markdown).includes(q) ? String(quote).trim() : "";
 }

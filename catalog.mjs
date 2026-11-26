@@ -31,12 +31,23 @@ export const CATALOG = [
 
 export const WEIGHTS = { ipk: 25, bahasa: 15, negara: 20, prestasi: 20, bidang: 10, pendanaan: 10 };
 
-const ALIASES = { hongkong: "hong kong", hk: "hong kong", usa: "amerika serikat", us: "amerika serikat", amerika: "amerika serikat", uk: "inggris", "united kingdom": "inggris", korea: "korea selatan", china: "tiongkok", cina: "tiongkok", singapore: "singapura", japan: "jepang", "new zealand": "selandia baru", nz: "selandia baru", netherlands: "belanda", germany: "jerman", taiwan: "taiwan" };
+const ALIASES = new Map(Object.entries({ hongkong: "hong kong", hk: "hong kong", usa: "amerika serikat", us: "amerika serikat", amerika: "amerika serikat", uk: "inggris", "united kingdom": "inggris", korea: "korea selatan", china: "tiongkok", cina: "tiongkok", singapore: "singapura", japan: "jepang", "new zealand": "selandia baru", nz: "selandia baru", netherlands: "belanda", germany: "jerman", taiwan: "taiwan" }));
 const norm = (s) => String(s ?? "").toLowerCase().trim();
-const country = (c) => ALIASES[norm(c)] ?? norm(c);
+const country = (c) => ALIASES.get(norm(c)) ?? norm(c);
 const list = (s) => (Array.isArray(s) ? s : String(s ?? "").split(",")).map(norm).filter(Boolean);
 const fmt = (n, d = 2) => Number(n).toFixed(d).replace(".", ",");
 const KNOWN_COUNTRIES = [...new Set(CATALOG.flatMap((s) => s.countries))];
+
+function countriesInNotes(notes) {
+  const text = norm(notes);
+  return [...KNOWN_COUNTRIES, ...ALIASES.keys()].filter((c) => c.length > 3 && new RegExp(`\\b${c}\\b`).test(text)).map(country);
+}
+
+// Return only catalog labels before using free-form profile fields in a provider query.
+export function discoveryCountries(destination, notes) {
+  const requested = new Set([...list(destination).map(country), ...countriesInNotes(notes)]);
+  return [...requested].filter((c) => KNOWN_COUNTRIES.includes(c)).slice(0, 3);
+}
 
 export function isExpired(deadline, today) {
   return Boolean(deadline) && deadline < today;
@@ -86,7 +97,7 @@ export function scoreScholarship(profile, notes, s) {
   const gpa = Number(profile.ipk) || 0;
   const ielts = Number(profile.skor_bahasa) || 0;
   const semester = Number(profile.semester) || 0;
-  const wanted = new Set([...list(profile.negara_tujuan).map(country), ...KNOWN_COUNTRIES.filter((c) => notesText.includes(c)), ...Object.keys(ALIASES).filter((a) => a.length > 3 && notesText.includes(a)).map(country)]);
+  const wanted = new Set([...list(profile.negara_tujuan).map(country), ...countriesInNotes(notes)]);
   const needFunding = Boolean(profile.butuh_pendanaan) || /fully funded|penuh/.test(notesText);
   const fields = list(profile.bidang_minat).concat(list(profile.prodi));
   const values = s.values ?? [];
@@ -132,8 +143,9 @@ export function scoreScholarship(profile, notes, s) {
   if (!items.length) add("prestasi", "Prestasi", 0, `Belum ada prestasi tercatat; program ini menilai ${values.join(", ")}`, false, achRule, criteriaQuote);
   else add("prestasi", "Prestasi", total, `${relevant.length} dari ${items.length} prestasimu relevan dengan kriteria program (${values.join(", ")})`, relevant.length > 0, achRule, criteriaQuote);
 
-  const fieldRule = "10 = bidangmu disebut sebagai prioritas; 7 = terbuka untuk semua bidang (tidak ada keunggulan khusus); 2 = bidangmu bukan prioritas program.";
+  const fieldRule = "10 jika bidangmu prioritas, 7 jika terbuka untuk semua bidang, 5 jika data bidang belum tersedia, dan 2 jika bidangmu bukan prioritas.";
   if (s.fields.includes("semua")) add("bidang", "Bidang", 7, "Terbuka untuk semua bidang studi", true, fieldRule);
+  else if (!s.fields.length) add("bidang", "Bidang", 5, "Data bidang studi belum tersedia", false, fieldRule);
   else {
     const match = s.fields.filter((sf) => fields.some((f) => f.includes(sf) || sf.includes(f)));
     if (match.length) add("bidang", "Bidang", 10, `Bidangmu (${match.join(", ")}) termasuk prioritas program`, true, fieldRule);
@@ -169,7 +181,7 @@ function buildInsight(s, breakdown, relevant, values, ev) {
   const failed = [...gates.filter((b) => b.points === 0), ...breakdown.filter((b) => b.key === "penalti")];
   const admin = failed.length
     ? { ok: false, text: `Belum lolos syarat administrasi: ${failed.map((b) => b.detail).join("; ")}. Ini syarat gugur, jadi penuhi dulu sebelum mendaftar.` }
-    : { ok: true, text: gates.length ? `Lolos syarat administrasi yang tertulis: ${gates.map((b) => b.detail).join("; ")}.` : "Halaman tidak menulis syarat angka (IPK/bahasa); cek dokumen wajib di situs resmi." };
+    : { ok: true, text: gates.length ? `Profil memenuhi batas angka yang tersedia: ${gates.map((b) => b.detail).join("; ")}. Cek syarat lengkap sebelum mendaftar.` : "Data syarat angka belum tersedia. Cek dokumen wajib di situs resmi." };
 
   const valuesText = values.map((v) => VALUE_LABELS[v]).join(", ") || "kriteria umum";
   const strongest = relevant.slice(0, 2).map((a) => `“${a.text}” (${a.level.toLowerCase()}, ${a.relevant.map((t) => VALUE_LABELS[t]).join("/")}, +${a.points} poin)`);
@@ -195,7 +207,7 @@ export function limitsOf(s, profile, today) {
   if (!s.levels.length) limits.push("Jenjang tidak tertulis");
   else if (!s.levels.some((l) => (target === "exchange" ? norm(l).startsWith("exchange") : norm(l) === target))) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
   if (isExpired(s.deadline, today)) limits.push("Deadline periode ini lewat, pantau periode berikutnya");
-  if (s.official === false) limits.push("Sumber situs agregator, cek ke situs resmi");
+  if (s.official === false) limits.push("Sumber belum terverifikasi sebagai penyelenggara, cek ke situs resmi");
   if (LOCAL_ONLY.test(`${s.name} ${s.requirements ?? ""}`)) limits.push("Tampaknya khusus warga lokal, cek kelayakan WNI");
   return limits;
 }

@@ -1,45 +1,51 @@
 # beasiswa.in — agen pencari beasiswa (prototipe)
 
-Prototype fitur **Cari Beasiswa** untuk video demo. Hanya fitur beasiswa: tanpa login, allowlist, halaman publik, atau admin (satu "Member Demo").
+Prototipe **Cari Beasiswa** untuk satu pengguna di komputer lokal. Profil, riwayat, dan hasil tersimpan berbagi satu berkas JSON.
 
 ## Jalankan
 
 ```bash
-node server.mjs          # mode DEMO, tanpa install apa pun
-# buka http://localhost:3000
+npm ci
+npm start                # mode DEMO jika tidak ada API key
+# buka http://localhost:3000 (server mendengarkan di 127.0.0.1)
 ```
 
 Mode LIVE (agen Claude sungguhan, cari di web):
 
 ```bash
-npm install
 ANTHROPIC_API_KEY=sk-ant-... node server.mjs      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; node server.mjs
 ```
 
-Mode FIRECRAWL (dipakai otomatis bila `.env` berisi `FIRECRAWL_API_KEY=...`): Firecrawl Search (5 kueri, tanpa data pribadi) → Firecrawl Scrape + ekstraksi JSON 10 halaman → tiap kutipan dicek kata per kata ke teks halaman → skor → cari artikel pengalaman awardee. ±40–60 detik, ±70 kredit Firecrawl per pencarian.
+Mode FIRECRAWL dipakai otomatis bila `.env` berisi `FIRECRAWL_API_KEY=...`. Aplikasi menjalankan 5 kueri, membaca maksimal 10 halaman, mencocokkan kutipan dengan teks sumber, menghitung skor, lalu mencari artikel awardee untuk maksimal 5 program. Biaya dan waktu bergantung pada halaman dan kebijakan penyedia.
 
 | Mode | Sumber hasil | Biaya |
 |---|---|---|
-| FIRECRAWL (prioritas) | Halaman web nyata + kutipan syarat terverifikasi + referensi awardee | ±70 kredit / pencarian |
-| DEMO (default) | 15 beasiswa contoh di `catalog.mjs` + skor rule-based. **Deadline & syarat = data contoh**, bukan data resmi. | Gratis |
-| LIVE | Claude Opus 5.5 + `web_search` (maks 8) + `web_fetch` (maks 10), effort `medium`. URL hasil divalidasi: harus benar-benar dibuka agen. | ±US$0,20–0,50 per pencarian |
+| FIRECRAWL (prioritas) | Halaman web, kutipan yang ditemukan dalam teks sumber, dan artikel awardee | Kredit Firecrawl |
+| DEMO (default) | 24 beasiswa contoh di `catalog.mjs`. **Deadline dan syarat merupakan data contoh.** | Gratis |
+| LIVE | Claude + penelusuran web. URL hasil harus cocok dengan URL yang dikembalikan alat pencarian atau pembacaan halaman. | Token dan penggunaan alat Anthropic |
 
 ## Cakupan PRD
 
 | ID | Status |
 |---|---|
 | S1 Profil beasiswa | ✅ form, validasi server, disimpan terpisah |
-| + Upload CV | ✅ PDF → kolom profil terisi otomatis (di luar PRD, tambahan). Teks dibaca di browser, file CV tidak disimpan, email/HP/NIM disamarkan. LIVE: Claude, DEMO: pembacaan pola |
+| + Upload CV | ✅ PDF → kolom profil terisi otomatis. PDF dibaca di browser dengan PDF.js dari dependensi lokal. Teks diproses di server lokal tanpa dikirim ke AI. |
 | S2 Mulai pencarian + catatan | ✅ API balas `202` + `search_id`, jalan di background |
 | S3 Status live | ✅ polling 1,2 dtk, langkah agen tampil satu per satu |
-| S4 5–15 hasil berskor | ✅ alasan cocok, syarat belum terpenuhi, link resmi, deadline lewat dibuang, disclaimer |
+| S4 Hasil berskor | ✅ hingga 30 program dengan alasan kecocokan dan tautan sumber. Program berbeda jenjang atau berakhir tetap muncul dengan label. |
 | S5 Simpan | ✅ toggle idempoten (`PUT`/`DELETE /api/saved/:id`) |
 | S6 Riwayat | ✅ urut terbaru + hapus riwayat (privasi) |
-| S7 Kuota | ✅ 5/hari, 1 berjalan → `429` + `retry_after` |
+| S7 Kuota | ✅ 5 pencarian berhasil/hari, 1 berjalan, maksimal 10 percobaan berbayar/hari → `429` + `Retry-After` |
 | S8 Gagal | ✅ status `failed`, pesan jelas, kuota tidak terpakai |
 | + Sesuaikan CV | ✅ per beasiswa: opsi kalimat CV yang dihitung ulang (sebelum → sesudah), syarat yang tidak bisa diatasi lewat CV beserta alasannya, rencana pengembangan dengan link kursus/sertifikasi |
 
-Belum: auth/RLS Supabase, realtime, paginasi cursor, multi-user (pakai `data.json`).
+## Batas akses dan data
+
+- Jalankan untuk penggunaan lokal. API membatasi host dan origin browser. Aplikasi ini berbagi satu profil lokal tanpa akun, sehingga akses publik melalui proxy atau tunnel memerlukan autentikasi dan penyimpanan terisolasi per pengguna.
+- Aset JavaScript dan worker PDF dilayani dari origin aplikasi. Kebijakan CSP membatasi skrip dan koneksi ke origin sendiri, serta melarang pemuatan aplikasi dalam frame. CV dibatasi 5 MB, 15 halaman, 30.000 karakter, dan 15 detik pembacaan dokumen.
+- Penyedia web menerima jenjang, kategori negara/bidang yang dikenali, dan preferensi umum pendanaan. IPK, skor bahasa, teks CV, prestasi, dan catatan bebas dipakai di aplikasi lokal. Jika negara belum dikenali, pencarian web memakai kueri umum.
+- URL penyedia diperiksa format dan domainnya. Label sumber didasarkan pada domain institusi atau penyelenggara yang dikenal. Kutipan yang ditemukan di halaman tetap perlu dibaca dalam konteks program dan periode.
+- Simpan API key di `.env` lokal. Git mengecualikan `.env`, `data.json`, dan hasil tes browser.
 
 ## Naskah demo (±3 menit)
 
@@ -56,5 +62,10 @@ Reset data demo: hentikan server, hapus `data.json`.
 ## Tes
 
 ```bash
-node --test   # unit (mvp.test.mjs) + end-to-end server sungguhan mode demo (e2e.test.mjs), ±2 detik
+npm test
+npx e2e-web install chromium
+npm run test:browser
+npm audit
 ```
+
+Suite browser membutuhkan Node.js 22.22.3+ pada lini 22, atau 24.8+. Tes browser memakai profil fiktif dan server demo dengan penyimpanan terpisah di `.e2e/`. Jalankan dengan `BEASISWA_TEST_MOBILE=1` untuk viewport 375 × 812. Tes API memakai proses server dan penyimpanan sementara sendiri.
