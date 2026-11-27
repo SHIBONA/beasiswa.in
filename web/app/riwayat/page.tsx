@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { HistoryResponse, HistoryRow } from "@beasiswa/shared";
 import { HistoryTable } from "@/components/history-table";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Card, CardContent } from "@/components/ui/card";
+import { LoadError, Loading, PageHeading } from "@/components/states";
+import { buttonVariants } from "@/components/ui/button";
 import { api, errorText } from "@/lib/api";
 
 export default function HistoryPage() {
@@ -28,19 +29,17 @@ export default function HistoryPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Riwayat Pencarian</h1>
-        <p className="text-muted-foreground">Urut terbaru. Kamu bisa menghapus riwayat kapan saja.</p>
-      </div>
-      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-      {searches && (
-        <Card>
-          <CardContent>
-            {searches.length ? <HistoryTable searches={searches} onDelete={remove} /> : <p className="py-6 text-center text-muted-foreground">Belum ada pencarian.</p>}
-          </CardContent>
-        </Card>
-      )}
+    <div>
+      <PageHeading title="Riwayat Pencarian">Urut dari yang terbaru. Hapus riwayat yang tidak ingin kamu simpan.</PageHeading>
+      {error ? <LoadError title="Riwayat tidak bisa dimuat" message={error} />
+        : !searches ? <Loading>Memuat riwayat…</Loading>
+          : searches.length ? <HistoryTable searches={searches} onDelete={remove} />
+            : (
+              <div className="space-y-4">
+                <p>Belum ada pencarian. Pencarian yang kamu jalankan akan tercatat di sini.</p>
+                <Link className={buttonVariants()} href="/cari">Mulai mencari</Link>
+              </div>
+            )}
     </div>
   );
 }

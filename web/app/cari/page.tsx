@@ -5,12 +5,12 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import type { HistoryResponse, MetaResponse, ProfileResponse, SearchStartResponse } from "@beasiswa/shared";
 import { HistoryTable } from "@/components/history-table";
+import { LoadError, Loading, PageHeading } from "@/components/states";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { ApiError, api, errorText, sendJson } from "@/lib/api";
 
 type Data = ProfileResponse & HistoryResponse & { meta: MetaResponse };
@@ -20,16 +20,18 @@ export default function SearchPage() {
   const [data, setData] = useState<Data | null>(null);
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
     Promise.all([api<ProfileResponse>("/profile"), api<HistoryResponse>("/searches"), api<MetaResponse>("/meta")])
-      .then(([{ profile }, { searches }, meta]) => setData({ profile, searches, meta }), (err) => setError(errorText(err)));
+      .then(([{ profile }, { searches }, meta]) => setData({ profile, searches, meta }), (err) => setLoadError(errorText(err)));
   }, []);
 
   async function start(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setError("");
     try {
       const { search_id } = await api<SearchStartResponse>("/searches", sendJson("POST", { notes }));
       router.push(`/hasil/${encodeURIComponent(search_id)}`);
@@ -41,51 +43,53 @@ export default function SearchPage() {
     }
   }
 
-  if (!data) return error ? <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert> : null;
+  if (!data) return loadError ? <LoadError title="Halaman pencarian tidak bisa dimuat" message={loadError} /> : <Loading>Memuat profil dan riwayat…</Loading>;
   const { profile, searches, meta } = data;
   const recent = searches.slice(0, 3);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Cari Beasiswa</h1>
-        <p className="text-muted-foreground">Agen AI mencari beasiswa di web lalu mengurutkannya berdasarkan kecocokan dengan profilmu.</p>
-      </div>
+    <div className="space-y-12">
+      <PageHeading title="Cari Beasiswa">
+        Agen mencari beasiswa di web, lalu mengurutkannya dari yang paling cocok dengan profilmu.
+      </PageHeading>
+
       {profile ? (
-        <Card>
-          <CardContent>
-            <form onSubmit={start} className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p><b>Profil:</b> {profile.jenjang_saat_ini} {profile.prodi} → {profile.jenjang_tujuan} · IPK {profile.ipk} · {profile.negara_tujuan || "semua negara"}</p>
-                <Link href="/profil" className={buttonVariants({ variant: "outline" })}>Ubah profil / upload CV</Link>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="notes">Catatan tambahan <span className="font-normal text-muted-foreground">(opsional)</span></Label>
-                <Input id="notes" maxLength={300} placeholder='Contoh: "fully funded, Jepang, S2 2027"' value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Badge variant="secondary">Sisa kuota hari ini: {meta.quota_left}/{meta.daily_quota}</Badge>
-                <Button type="submit" disabled={busy}>🔎 Cari beasiswa</Button>
-              </div>
-              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-            </form>
-          </CardContent>
-        </Card>
+        <form onSubmit={start} className="space-y-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2 border-b pb-4">
+            <p>
+              <span className="text-muted-foreground">Profil: </span>
+              {profile.jenjang_saat_ini} {profile.prodi}, tujuan {profile.jenjang_tujuan} · IPK {profile.ipk} · {profile.negara_tujuan || "semua negara"}
+            </p>
+            <Link href="/profil" className="text-sm underline underline-offset-4">Ubah profil</Link>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="notes">Catatan untuk agen <span className="font-normal text-muted-foreground">(opsional)</span></Label>
+            <Input id="notes" maxLength={300} placeholder="Contoh: fully funded, Jepang, S2 2027" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <Button type="submit" size="lg" disabled={busy}>
+              {busy && <Spinner aria-hidden="true" />}
+              Cari beasiswa
+            </Button>
+            <p className="text-sm text-muted-foreground">Sisa {meta.quota_left} dari {meta.daily_quota} pencarian hari ini</p>
+          </div>
+          {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
+        </form>
       ) : (
-        <Card>
-          <CardContent className="space-y-4 py-6 text-center text-muted-foreground">
-            <p>Isi profil beasiswa dulu supaya agen tahu apa yang cocok untukmu.</p>
-            <Link className={buttonVariants()} href="/profil">Upload CV / isi profil</Link>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <p>Agen butuh profil beasiswamu untuk menilai kecocokan. Isi manual atau unggah CV, hanya perlu sekali.</p>
+          <Link className={buttonVariants()} href="/profil">Isi profil</Link>
+        </div>
       )}
+
       {recent.length > 0 && (
-        <Card>
-          <CardContent className="space-y-2">
-            <h2 className="font-semibold">Pencarian terakhir</h2>
-            <HistoryTable searches={recent} />
-          </CardContent>
-        </Card>
+        <section className="space-y-3">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-lg font-semibold">Pencarian terakhir</h2>
+            <Link href="/riwayat" className="text-sm underline underline-offset-4">Semua riwayat</Link>
+          </div>
+          <HistoryTable searches={recent} />
+        </section>
       )}
     </div>
   );

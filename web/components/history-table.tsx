@@ -1,18 +1,20 @@
 "use client";
 
+import { CheckIcon, CircleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import type { HistoryRow } from "@beasiswa/shared";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { STATUS, fmtTime } from "@/lib/format";
 
-export const statusTone: Record<string, string> = {
-  queued: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
-  running: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200",
-  succeeded: "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
-  failed: "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-200",
-};
+// Status is always written out; the icon only repeats it.
+export function SearchStatus({ status }: { status: string }) {
+  const icon = status === "succeeded" ? <CheckIcon aria-hidden="true" className="size-4 text-success" />
+    : status === "failed" ? <CircleAlertIcon aria-hidden="true" className="size-4 text-destructive" />
+      : <Spinner aria-hidden="true" />;
+  return <span className="inline-flex items-center gap-1.5 text-sm">{icon}{STATUS[status] ?? status}</span>;
+}
 
 export function HistoryTable({ searches, onDelete }: { searches: HistoryRow[]; onDelete?: (id: string) => void }) {
   return (
@@ -29,19 +31,21 @@ export function HistoryTable({ searches, onDelete }: { searches: HistoryRow[]; o
       <TableBody>
         {searches.map((s) => (
           <TableRow key={s.id}>
-            <TableCell>{fmtTime(s.created_at)}</TableCell>
-            <TableCell className="whitespace-normal">{s.notes || "-"}</TableCell>
-            <TableCell><Badge className={statusTone[s.status]}>{STATUS[s.status]}</Badge></TableCell>
-            <TableCell className="whitespace-normal">
+            <TableCell className="text-muted-foreground">{fmtTime(s.created_at)}</TableCell>
+            <TableCell className="min-w-40 whitespace-normal">{s.notes || "Tanpa catatan"}</TableCell>
+            <TableCell><SearchStatus status={s.status} /></TableCell>
+            <TableCell className="min-w-48 whitespace-normal">
               {s.status === "succeeded" ? (
-                <>{s.count} beasiswa<br /><span className="text-muted-foreground">Teratas: {s.top}</span></>
-              ) : s.status === "failed" ? s.error : "…"}
+                s.count ? <>{s.count} beasiswa<span className="block text-muted-foreground">Teratas: {s.top}</span></> : "Tidak ada beasiswa berbukti"
+              ) : s.status === "failed" ? s.error : "Masih berjalan"}
             </TableCell>
             <TableCell>
-              <div className="flex items-center gap-2">
-                <Link className="text-primary underline-offset-4 hover:underline" href={`/hasil/${encodeURIComponent(s.id)}`}>Lihat</Link>
+              <div className="flex items-center justify-end gap-2">
+                <Link className="rounded-md px-2 py-1 underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50" href={`/hasil/${encodeURIComponent(s.id)}`}>
+                  Lihat
+                </Link>
                 {onDelete && s.status !== "running" && s.status !== "queued" && (
-                  <Button variant="outline" size="sm" onClick={() => onDelete(s.id)}>Hapus</Button>
+                  <Button variant="ghost" onClick={() => onDelete(s.id)}>Hapus</Button>
                 )}
               </div>
             </TableCell>

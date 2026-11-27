@@ -15,11 +15,17 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   await connection();
   return (
     <html lang="id">
-      <body className="min-h-dvh bg-muted/40 antialiased">
+      <body className="min-h-dvh bg-background antialiased">
+        <a
+          href="#konten"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-3 focus:py-2 focus:text-primary-foreground"
+        >
+          Langsung ke konten
+        </a>
         <Suspense>
           <SiteHeader />
         </Suspense>
-        <main className="mx-auto w-full max-w-5xl px-4 pt-6 pb-16">{children}</main>
+        <main id="konten" className="mx-auto w-full max-w-3xl px-4 pt-8 pb-20 sm:px-6 sm:pt-12">{children}</main>
         <Toaster position="bottom-center" />
       </body>
     </html>

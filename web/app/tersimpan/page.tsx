@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { ApiResult, SavedResponse } from "@beasiswa/shared";
 import { ResultCard, programKey } from "@/components/result-card";
+import { LoadError, Loading, PageHeading } from "@/components/states";
 import { useBookmarks } from "@/components/use-bookmarks";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Card, CardContent } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
 import { api, errorText } from "@/lib/api";
 import { DISCLAIMER } from "@/lib/format";
 
@@ -19,15 +20,17 @@ export default function SavedPage() {
   useEffect(load, [load]);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Beasiswa Tersimpan</h1>
-        <p className="text-muted-foreground">Beasiswa yang kamu tandai untuk dipersiapkan.</p>
-      </div>
-      {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-      {saved && (saved.length ? <SavedList saved={saved} onChange={load} /> : (
-        <Card><CardContent className="py-6 text-center text-muted-foreground">Belum ada beasiswa tersimpan.</CardContent></Card>
-      ))}
+    <div>
+      <PageHeading title="Beasiswa Tersimpan">Beasiswa yang kamu tandai untuk dipersiapkan. {saved?.length ? DISCLAIMER : ""}</PageHeading>
+      {error ? <LoadError title="Daftar tersimpan tidak bisa dimuat" message={error} />
+        : !saved ? <Loading>Memuat beasiswa tersimpan…</Loading>
+          : saved.length ? <SavedList saved={saved} onChange={load} />
+            : (
+              <div className="space-y-4">
+                <p>Belum ada beasiswa tersimpan. Tekan Simpan di kartu hasil pencarian untuk menandainya.</p>
+                <Link className={buttonVariants()} href="/cari">Cari beasiswa</Link>
+              </div>
+            )}
     </div>
   );
 }
@@ -35,13 +38,10 @@ export default function SavedPage() {
 function SavedList({ saved, onChange }: { saved: ApiResult[]; onChange: () => void }) {
   const bookmarks = useBookmarks(saved.map(programKey), onChange);
   return (
-    <>
-      <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
-        <AlertDescription className="text-inherit">⚠️ {DISCLAIMER}</AlertDescription>
-      </Alert>
+    <div className="space-y-4">
       {saved.map((r) => (
         <ResultCard key={r.id} result={r} saved={bookmarks.isSaved(r)} busy={bookmarks.isBusy(r)} fromBookmarks onToggleSave={bookmarks.toggle} />
       ))}
-    </>
+    </div>
   );
 }

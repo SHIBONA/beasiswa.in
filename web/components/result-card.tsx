@@ -1,18 +1,19 @@
 "use client";
 
+import { BookmarkCheckIcon, BookmarkIcon, CheckIcon, ChevronDownIcon, CircleAlertIcon, TriangleAlertIcon } from "lucide-react";
 import Link from "next/link";
 import type { ApiResult } from "@beasiswa/shared";
-import { Badge } from "@/components/ui/badge";
+import { Quote, SourceLink } from "@/components/source-link";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Quote, SourceLink } from "@/components/source-link";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { fmtDate, hostOf } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const SOURCE_NOTES: Record<string, string> = {
-  demo: "Angka syarat: data contoh mode demo. Cek angka resmi di situs penyelenggara.",
-  firecrawl: "Angka diekstrak Firecrawl, tetapi kalimat aslinya tidak ditemukan kata per kata di halaman. Cek manual.",
-  claude: "Angka dirangkum agen dari hasil pencarian web. Cek di situs resmi.",
+  demo: "Angka syarat ini data contoh mode demo. Cek angka resmi di situs penyelenggara.",
+  firecrawl: "Firecrawl mengekstrak angka ini, tetapi kalimat aslinya tidak ditemukan kata per kata di halaman. Cek manual.",
+  claude: "Agen merangkum angka ini dari hasil pencarian web. Cek di situs resmi.",
 };
 
 export const programKey = (r: ApiResult) => r.program_id ?? r.id;
@@ -21,7 +22,6 @@ type Props = { result: ApiResult; saved: boolean; busy?: boolean; fromBookmarks?
 
 export function ResultCard({ result: r, saved, busy = false, fromBookmarks = false, onToggleSave }: Props) {
   const score = Number(r.score) || 0;
-  const color = score >= 75 ? "var(--color-emerald-600)" : score >= 50 ? "var(--primary)" : "var(--color-amber-600)";
   const limits = r.limits ?? [];
   const evidence = r.program?.evidence;
   const checked = r.program?.source_checked_at;
@@ -29,168 +29,180 @@ export function ResultCard({ result: r, saved, busy = false, fromBookmarks = fal
     ? new Date(checked).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })
     : "";
   const quotes = evidence?.jenjang
-    ? [["Jenjang", evidence.jenjang], ["Lokasi studi", evidence.lokasi], ["Pendaftaran buka", evidence.pembukaan], ["Batas pendaftaran", evidence.deadline]].filter(([, quote]) => quote)
+    ? [["Jenjang", evidence.jenjang], ["Lokasi studi", evidence.lokasi], ["Pendaftaran dibuka", evidence.pembukaan], ["Batas pendaftaran", evidence.deadline]].filter(([, quote]) => quote)
     : [];
+  const facts = [r.provider, r.country, r.level, r.funding && `Dana ${r.funding.toLowerCase()}`].filter(Boolean);
 
   return (
-    <Card role="article" aria-label={r.name} data-limited={limits.length > 0} className={cn(limits.length > 0 && "ring-amber-300 dark:ring-amber-800")}>
-      <CardContent className="grid gap-4 sm:grid-cols-[auto_1fr]">
-        <div
-          role="img"
-          aria-label={`Skor kecocokan ${score}`}
-          className={cn("grid size-16 place-items-center rounded-full", limits.length > 0 && "opacity-70")}
-          style={{ background: `conic-gradient(${color} ${score}%, var(--border) 0)` }}
-        >
-          <span className="grid size-12 place-items-center rounded-full bg-card text-lg font-bold">{score}</span>
+    <Card role="article" aria-label={r.name} data-limited={limits.length > 0}>
+      <CardContent className="space-y-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-1.5">
+            <h3 className="text-lg font-semibold leading-snug">{r.name}</h3>
+            <p className="text-sm text-muted-foreground">{facts.join(" · ")}</p>
+            <p className="text-sm">
+              Tutup pendaftaran: <span className="font-medium">{fmtDate(r.deadline)}</span>
+              {checkedDate && <span className="text-muted-foreground"> · sumber diperiksa {checkedDate}</span>}
+            </p>
+          </div>
+          <p className="shrink-0 text-right" aria-label={`Skor kecocokan ${score} dari 100`}>
+            <span aria-hidden="true" className="block text-3xl font-semibold tabular-nums leading-none">{score}</span>
+            <span aria-hidden="true" className="text-xs text-muted-foreground">dari 100</span>
+          </p>
         </div>
-        <div className="min-w-0 space-y-3">
-          <h3 className="text-lg font-semibold">{r.name}</h3>
-          {limits.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {limits.map((l) => <Badge key={l} className="bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200">⚠ {l}</Badge>)}
-            </div>
-          )}
-          <div className="flex flex-wrap gap-1.5">
-            <Badge variant="secondary">{r.provider}</Badge>
-            <Badge variant="secondary">📍 {r.country}</Badge>
-            <Badge variant="secondary">🎓 {r.level}</Badge>
-            <Badge variant="secondary">💰 {r.funding}</Badge>
-            <Badge variant="secondary">⏰ {fmtDate(r.deadline)}</Badge>
-          </div>
-          {checkedDate && <p className="text-sm text-muted-foreground">Sumber diperiksa {checkedDate}</p>}
+
+        {limits.length > 0 && (
+          <ul className="space-y-1 text-sm text-warning">
+            {limits.map((l) => (
+              <li key={l} className="flex gap-2"><TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />{l}</li>
+            ))}
+          </ul>
+        )}
+
+        <p className="text-sm"><span className="text-muted-foreground">Syarat ringkas: </span>{r.requirements}</p>
+
+        <InsightList r={r} />
+
+        <div className="divide-y border-y">
           {quotes.length > 0 && (
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">Bukti dari sumber</summary>
-              {quotes.map(([label, quote]) => (
-                <blockquote key={label} className="my-2 border-l-4 border-primary/40 bg-muted/60 px-3 py-2 text-sm"><b>{label}</b><br />{quote}</blockquote>
-              ))}
-            </details>
+            <Section title="Bukti dari halaman sumber">
+              <div className="space-y-3">{quotes.map(([label, quote]) => <Quote key={label} quote={quote} cite={label} />)}</div>
+            </Section>
           )}
-          <p className="text-sm"><b>Syarat ringkas:</b> {r.requirements}</p>
-          <InsightBlock r={r} />
-          <BreakdownBlock r={r} />
-          <AchievementsBlock r={r} />
-          <AwardeeBlock r={r} />
-          <div className="flex flex-wrap gap-2 pt-1">
-            {r.program && (
-              <Link className={buttonVariants()} href={`/sesuaikan/${encodeURIComponent(r.id)}${fromBookmarks ? "?dari=tersimpan" : ""}`}>🛠 Sesuaikan CV</Link>
-            )}
-            <SourceLink href={r.url} className={buttonVariants({ variant: "outline" })}>
-              {r.program?.official === false ? "Buka sumber ↗" : "Buka sumber resmi ↗"}
-            </SourceLink>
-            <Button variant={saved ? "secondary" : "outline"} disabled={busy} aria-pressed={saved} onClick={() => onToggleSave(r)}>
-              {saved ? "★ Tersimpan" : "☆ Simpan"}
-            </Button>
-          </div>
+          <Breakdown r={r} />
+          <Achievements r={r} />
+          <Awardees r={r} />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {r.program && (
+            <Link className={buttonVariants()} href={`/sesuaikan/${encodeURIComponent(r.id)}${fromBookmarks ? "?dari=tersimpan" : ""}`}>Sesuaikan CV</Link>
+          )}
+          <SourceLink href={r.url} className={cn(buttonVariants({ variant: "outline" }), "no-underline hover:text-foreground")}>
+            {r.program?.official === false ? "Buka sumber" : "Buka situs resmi"}
+          </SourceLink>
+          <Button variant="outline" disabled={busy} aria-pressed={saved} onClick={() => onToggleSave(r)}>
+            {saved ? <BookmarkCheckIcon aria-hidden="true" /> : <BookmarkIcon aria-hidden="true" />}
+            {saved ? "Tersimpan" : "Simpan"}
+          </Button>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function Panel({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+// A closed-by-default section; the heading says what is inside.
+function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border bg-muted/30 p-3">
-      <h4 className="mb-2 text-sm font-semibold">{title}</h4>
-      {children}
-    </section>
+    <Collapsible>
+      <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 rounded-md py-3 text-left text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+        {title}
+        <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pb-4">{children}</CollapsibleContent>
+    </Collapsible>
   );
 }
 
 // Why this program fits, per selection stage (older saved results fall back to reasons/gaps).
-function InsightBlock({ r }: { r: ApiResult }) {
-  if (!r.insight) {
-    return (
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Panel title="✓ Kenapa cocok">
-          <ul className="list-disc pl-5 text-sm">{(r.reasons ?? []).map((x) => <li key={x}>{x}</li>)}{!r.reasons?.length && <li>-</li>}</ul>
-        </Panel>
-        <Panel title="! Belum terpenuhi">
-          <ul className="list-disc pl-5 text-sm">{(r.gaps ?? []).map((x) => <li key={x}>{x}</li>)}{!r.gaps?.length && <li>Semua syarat utama terpenuhi</li>}</ul>
-        </Panel>
-      </div>
-    );
-  }
+function InsightList({ r }: { r: ApiResult }) {
+  const stages = r.insight ?? [
+    { label: "Kenapa cocok", ok: true, text: (r.reasons ?? []).join(". ") || "-" },
+    { label: "Belum terpenuhi", ok: !(r.gaps ?? []).length, text: (r.gaps ?? []).join(". ") || "Semua syarat utama terpenuhi" },
+  ];
   return (
-    <Panel title={`💡 Analisis peluang di ${r.name}`}>
-      <div className="space-y-2">
-        {r.insight.map((i) => (
-          <div key={i.label} className={cn("rounded-md border-l-4 px-3 py-2 text-sm", i.ok ? "border-emerald-500" : "border-amber-500")}>
-            <b className={i.ok ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>{i.ok ? "✓" : "!"} {i.label}</b>
-            <p>{i.text}</p>
-            {(i.quotes ?? []).map((q) => <Quote key={q.quote} quote={q.quote} cite={`${q.text}, teks sumber ${hostOf(r.url)}`} />)}
+    <ul className="space-y-3">
+      {stages.map((i) => (
+        <li key={i.label} className="flex gap-3 text-sm">
+          {i.ok
+            ? <CheckIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-success" />
+            : <CircleAlertIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />}
+          <div className="min-w-0 space-y-2">
+            <p><span className="font-medium">{i.label}</span> <span className="text-muted-foreground">({i.ok ? "terpenuhi" : "perlu perhatian"})</span></p>
+            <p className="text-muted-foreground">{i.text}</p>
+            {"quotes" in i && (i.quotes ?? []).map((q) => <Quote key={q.quote} quote={q.quote} cite={`${q.text}, ${hostOf(r.url)}`} />)}
           </div>
-        ))}
-      </div>
-    </Panel>
+        </li>
+      ))}
+    </ul>
   );
 }
 
-// Quantitative indicator: points per component, sums to the score.
-function BreakdownBlock({ r }: { r: ApiResult }) {
+// Points per component; they add up to the score.
+function Breakdown({ r }: { r: ApiResult }) {
   if (!r.breakdown?.length) return null;
   return (
-    <Panel title={<>📊 Rincian skor ({Number(r.score) || 0}/100) <span className="font-normal text-muted-foreground">· klik baris untuk melihat dasar penilaian</span></>}>
-      {r.breakdown.map((b, i) => {
-        const penalty = b.points < 0;
-        const pct = penalty ? 100 : b.max ? Math.round((b.points / b.max) * 100) : 0;
-        const tone = penalty ? "bg-red-500" : pct >= 70 ? "bg-emerald-500" : pct >= 40 ? "bg-primary" : "bg-amber-500";
-        const sourced = ["ipk", "bahasa", "pendanaan", "penalti"].includes(b.key);
-        return (
-          <details key={`${b.key}-${i}`} className="group border-b last:border-b-0">
-            <summary className="grid cursor-pointer grid-cols-[7rem_1fr_auto] items-center gap-3 py-1.5 text-sm">
-              <span>{b.label}</span>
-              <span className="h-2 overflow-hidden rounded-full bg-muted"><i className={cn("block h-full", tone)} style={{ width: `${pct}%` }} /></span>
-              <span className="tabular-nums">{penalty ? b.points : `${b.points}/${b.max}`}</span>
-            </summary>
-            <div className="space-y-1 pb-2 text-sm">
-              <div><b>{b.detail}</b></div>
-              {b.rule && <div><span className="text-muted-foreground">Aturan poin:</span> {b.rule}</div>}
-              {b.quote ? <Quote quote={b.quote} cite={`teks sumber ${hostOf(r.url)}`} />
-                : <div className="text-muted-foreground">{sourced ? SOURCE_NOTES[r.source] ?? SOURCE_NOTES.demo : "Dihitung dari profil beasiswamu dan data program."}</div>}
-            </div>
-          </details>
-        );
-      })}
-    </Panel>
+    <Section title={`Rincian skor (${Number(r.score) || 0} dari 100)`}>
+      <ul className="space-y-1">
+        {r.breakdown.map((b, i) => {
+          const penalty = b.points < 0;
+          const sourced = ["ipk", "bahasa", "pendanaan", "penalti"].includes(b.key);
+          return (
+            <li key={`${b.key}-${i}`}>
+              <Collapsible>
+                <CollapsibleTrigger className="grid w-full grid-cols-[6.5rem_1fr_auto] items-center gap-3 rounded-md py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50">
+                  <span>{b.label}</span>
+                  {penalty
+                    ? <span className="text-destructive">Penalti</span>
+                    : (
+                      // Inside a button, so plain spans; the numbers beside it carry the value for screen readers.
+                      <span aria-hidden="true" className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <span className="block h-full rounded-full bg-primary" style={{ width: `${b.max ? Math.round((b.points / b.max) * 100) : 0}%` }} />
+                      </span>
+                    )}
+                  <span className={cn("tabular-nums", penalty && "text-destructive")}>{penalty ? b.points : `${b.points}/${b.max}`}</span>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-2 pb-3 text-sm">
+                  <p className="font-medium">{b.detail}</p>
+                  {b.rule && <p className="text-muted-foreground">Aturan poin: {b.rule}</p>}
+                  {b.quote
+                    ? <Quote quote={b.quote} cite={`Teks sumber, ${hostOf(r.url)}`} />
+                    : <p className="text-muted-foreground">{sourced ? SOURCE_NOTES[r.source] ?? SOURCE_NOTES.demo : "Dihitung dari profil beasiswamu dan data program."}</p>}
+                </CollapsibleContent>
+              </Collapsible>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
   );
 }
 
-function AchievementsBlock({ r }: { r: ApiResult }) {
+function Achievements({ r }: { r: ApiResult }) {
   if (!r.achievements?.length) return null;
   const relevant = r.achievements.filter((a) => a.relevant.length).length;
   const total = r.breakdown?.find((b) => b.key === "prestasi");
   return (
-    <Panel title={`🏆 Prestasi yang cocok: ${relevant} dari ${r.achievements.length}${total ? ` · ${total.points}/${total.max} poin` : ""}`}>
-      <ul className="space-y-1.5 text-sm">
+    <Section title={`Prestasi yang cocok: ${relevant} dari ${r.achievements.length}${total ? `, ${total.points}/${total.max} poin` : ""}`}>
+      <ul className="space-y-2 text-sm">
         {r.achievements.map((a) => (
-          <li key={a.text} className="flex flex-wrap items-center gap-1.5">
-            <span className={cn("rounded-md px-1.5 font-semibold tabular-nums", a.relevant.length ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200" : "bg-muted")}>+{a.points}</span>
-            <span>{a.text}</span>
-            <Badge variant="secondary">{a.level}</Badge>
-            {a.relevant.map((t) => <Badge key={t} variant="outline">✓ {t}</Badge>)}
+          <li key={a.text} className="grid grid-cols-[2.5rem_1fr] gap-2">
+            <span className="tabular-nums text-muted-foreground">+{a.points}</span>
+            <span>
+              {a.text} <span className="text-muted-foreground">· {a.level}{a.relevant.length ? ` · cocok dengan ${a.relevant.join(", ")}` : ""}</span>
+            </span>
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-xs text-muted-foreground">
-        Poin = tingkat (internasional 8 · nasional 6 · regional 4 · kampus 3) + 3 jika sesuai kriteria program + 1–2 untuk juara. Tidak relevan = setengah poin tingkat. Maks 20.
+      <p className="mt-3 text-xs text-muted-foreground">
+        Poin = tingkat (internasional 8, nasional 6, regional 4, kampus 3) + 3 jika sesuai kriteria program + 1 sampai 2 untuk juara. Prestasi di luar kriteria mendapat setengah poin tingkat. Maksimal 20.
       </p>
-    </Panel>
+    </Section>
   );
 }
 
-function AwardeeBlock({ r }: { r: ApiResult }) {
+function Awardees({ r }: { r: ApiResult }) {
   if (!r.awardee_refs?.length) return null;
   return (
-    <Panel title={<>🎓 Pengalaman awardee <span className="font-normal text-muted-foreground">· artikel publik hasil pencarian, belum diperiksa tim</span></>}>
-      <ul className="space-y-1.5 text-sm">
+    <Section title={`Cerita awardee (${r.awardee_refs.length}), artikel publik yang belum diperiksa tim`}>
+      <ul className="space-y-3 text-sm">
         {r.awardee_refs.map((x) => (
-          <li key={x.url}>
-            <SourceLink href={x.url}>{x.title || hostOf(x.url) || "Sumber"}</SourceLink> <span className="text-muted-foreground">{hostOf(x.url)}</span>
-            {x.description && <div className="text-muted-foreground">{x.description.slice(0, 200)}</div>}
+          <li key={x.url} className="space-y-1">
+            <SourceLink href={x.url}>{x.title || hostOf(x.url) || "Sumber"}</SourceLink>
+            <p className="text-muted-foreground">{hostOf(x.url)}{x.description && ` · ${x.description.slice(0, 200)}`}</p>
           </li>
         ))}
       </ul>
-    </Panel>
+    </Section>
   );
 }
