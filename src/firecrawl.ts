@@ -8,20 +8,28 @@ const API = "https://api.firecrawl.dev/v2";
 const TIMEOUT_MS = 90_000;
 const MIN_QUOTE_CHARS = 12;
 
+// Provider and model JSON is untrusted: read it as a plain record and check every field.
+export type Raw = Record<string, unknown>;
+export const record = (value: unknown): Raw => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Raw : {};
+
 const BLOCKED_HOSTS = ["facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com", "threads.net", "youtube.com", "linkedin.com", "scribd.com", "reddit.com", "quora.com", "pinterest.com"];
-export const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
-const hostMatches = (host, domain) => host === domain || host.endsWith(`.${domain}`);
+export const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
+const hostMatches = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
 const ORGANISERS = new Set([...CATALOG.map((s) => hostOf(s.url)), "daad.de", "europa.eu", "fulbrightprogram.org", "emb-japan.go.jp"]);
 const INSTITUTION_DOMAIN = /\.(?:gov|edu|(?:gov|govt|edu|ac|go)\.[a-z]{2})$/;
 
-export const isBlocked = (url) => !publicWebUrl(url) || BLOCKED_HOSTS.some((d) => hostMatches(hostOf(url), d));
-export const isOfficial = (url) => {
-  if (!publicWebUrl(url)) return false;
-  const host = hostOf(url);
+export const isBlocked = (url: unknown) => {
+  const parsed = publicWebUrl(url);
+  return !parsed || BLOCKED_HOSTS.some((d) => hostMatches(hostOf(parsed.href), d));
+};
+export const isOfficial = (url: unknown) => {
+  const parsed = publicWebUrl(url);
+  if (!parsed) return false;
+  const host = hostOf(parsed.href);
   return INSTITUTION_DOMAIN.test(host) || [...ORGANISERS].some((domain) => hostMatches(host, domain));
 };
 
-async function call(path, body) {
+async function call(path: string, body: object) {
   const response = await fetch(`${API}${path}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}`, "Content-Type": "application/json" },
@@ -43,7 +51,8 @@ async function call(path, body) {
   return data;
 }
 
-async function readResponse(response) {
+async function readResponse(response: Response) {
+  if (!response.body) throw new Error("Respons Firecrawl kosong.");
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -64,10 +73,13 @@ async function readResponse(response) {
   }
 }
 
-export async function search(query, limit) {
+export type SearchHit = { url: string; title: string; description: string };
+
+export async function search(query: string, limit: number): Promise<SearchHit[]> {
   const { data } = await call("/search", { query, limit, location: "Indonesia" });
-  return Array.isArray(data?.web) ? data.web.slice(0, limit).flatMap((r) => {
-    const url = publicWebUrl(r?.url);
+  return Array.isArray(data?.web) ? data.web.slice(0, limit).flatMap((item: unknown) => {
+    const r = record(item);
+    const url = publicWebUrl(r.url);
     return url && !isBlocked(url.href) ? [{
       url: url.href,
       title: typeof r.title === "string" ? r.title.slice(0, 240) : "",
@@ -76,7 +88,7 @@ export async function search(query, limit) {
   }) : [];
 }
 
-export async function scrapeJson(url, schema, prompt) {
+export async function scrapeJson(url: string, schema: object, prompt: string) {
   if (isBlocked(url)) throw new Error("URL sumber tidak diizinkan.");
   const { data } = await call("/scrape", { url, onlyMainContent: true, formats: ["markdown", { type: "json", schema, prompt }] });
   const finalUrl = publicWebUrl(data?.metadata?.url ?? data?.metadata?.sourceURL ?? url);
@@ -85,23 +97,27 @@ export async function scrapeJson(url, schema, prompt) {
 }
 
 // Runs tasks with a small concurrency cap; keeps result order; a failed task yields { error }.
-export async function pool(items, limit, task) {
-  const out = new Array(items.length);
+export type Failed = { error: unknown };
+// Task results must not carry their own "error" key (all callers return arrays).
+export const failed = (r: object): r is Failed => "error" in r;
+
+export async function pool<T, R extends object>(items: T[], limit: number, task: (item: T, i: number) => Promise<R>) {
+  const out = new Array<R | Failed>(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      out[i] = await task(items[i], i).catch((error) => ({ error }));
+      out[i] = await task(items[i], i).catch((error: unknown) => ({ error }));
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return out;
 }
 
-const clean = (text) => String(text ?? "").normalize("NFKC").toLowerCase().replace(/[*_`#|>\\[\]()]/g, " ").replace(/\s+/g, " ").trim();
+const clean = (text: unknown) => String(text ?? "").normalize("NFKC").toLowerCase().replace(/[*_`#|>\\[\]()]/g, " ").replace(/\s+/g, " ").trim();
 
 // A quote counts only if it is really on the page (anti-hallucination, PRD risk 11).
-export function verifyQuote(quote, markdown) {
+export function verifyQuote(quote: unknown, markdown: string) {
   if (typeof quote !== "string" || quote.length > 1000) return "";
   const q = clean(quote);
   return q.length >= MIN_QUOTE_CHARS && clean(markdown).includes(q) ? String(quote).trim() : "";

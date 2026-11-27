@@ -105,11 +105,11 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   const requests: { path: string; body: any }[] = [];
   const programUrl = "https://lpdp.kemenkeu.go.id/program";
   const quote = "Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00";
-  t.mock.method(globalThis, "fetch", async (input, options) => {
+  t.mock.method(globalThis, "fetch", async (input: string, options: RequestInit) => {
     const url = new URL(input);
     assert.equal(url.origin, "https://api.firecrawl.dev");
     assert.equal(options.redirect, "error");
-    const body = JSON.parse(options.body);
+    const body = JSON.parse(String(options.body));
     requests.push({ path: url.pathname, body });
     if (url.pathname === "/v2/search") {
       return Response.json({ success: true, data: { web: [{ url: programUrl }, { url: "https://localhost" }] } });
@@ -165,9 +165,9 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   const discovery = requests.filter((r) => r.path === "/v2/search" && !r.body.query.includes("awardee"));
   assert.ok(discovery.every((r) => /S2|master/i.test(r.body.query)));
   assert.ok(discovery.every((r) => /jepang|japan/i.test(r.body.query)));
-  assert.equal(output.results[0].program.evidence.ipk, quote);
-  assert.equal(output.results[0].program.evidence.bahasa, "");
-  assert.ok(Number.isFinite(Date.parse(output.results[0].program.source_checked_at)));
+  assert.equal(output.results[0].program.evidence?.ipk, quote);
+  assert.equal(output.results[0].program.evidence?.bahasa, "");
+  assert.ok(Number.isFinite(Date.parse(output.results[0].program.source_checked_at ?? "")));
   cache.close();
   cache = openStore(path, legacy);
   const repeated = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
@@ -185,6 +185,7 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
 test("insight explains each selection stage with the member's strongest achievement", () => {
   const { results } = matchCatalog({ ...profile, prestasi: "Kepala Divisi Teknis, Himpunan Mahasiswa Elektro" }, "", "2026-11-26");
   const lpdp = results.find((r) => r.name.includes("LPDP"));
+  assert.ok(lpdp);
   assert.deepEqual(lpdp.insight.map((i) => i.label), ["Seleksi administrasi", "Seleksi substansi", "Kesesuaian tujuan"]);
   assert.ok(lpdp.insight[0].ok);
   assert.match(lpdp.insight[1].text, /Kepala Divisi Teknis.*kepemimpinan/);
@@ -237,6 +238,7 @@ test("demo matcher shows eligible programs first, limited ones after with labels
   assert.deepEqual(ok.map((r) => r.score), [...ok.map((r) => r.score)].sort((a, b) => b - a));
   assert.equal(results[0].name, "MEXT Research Student Scholarship");
   const kip = results.find((r) => r.name.startsWith("KIP"));
+  assert.ok(kip);
   assert.deepEqual(kip.limits, ["Bukan untuk S2"]);
   assert.ok(kip.breakdown.some((b) => b.key === "penalti" && b.points === -30));
 });
@@ -244,18 +246,21 @@ test("demo matcher shows eligible programs first, limited ones after with labels
 test("past deadline is kept but labelled", () => {
   const { results, expired } = matchCatalog({ ...profile, jenjang_tujuan: "S1" }, "", "2026-11-26");
   assert.equal(expired, 1);
-  assert.ok(results.find((r) => r.name.includes("BCA")).limits.some((l) => l.startsWith("Deadline")));
+  const bca = results.find((r) => r.name.includes("BCA"));
+  assert.ok(bca?.limits.some((l) => l.startsWith("Deadline")));
 });
 
 test("unmet requirements show up as gaps", () => {
   const { results } = matchCatalog({ ...profile, ipk: 2.5, skor_bahasa: 0 }, "", "2026-11-26");
   const lpdp = results.find((r) => r.name.includes("LPDP"));
+  assert.ok(lpdp);
   assert.ok(lpdp.gaps.some((g) => g.includes("IPK kurang 0,50 (punya 2,50, minimal 3,00)")));
   assert.ok(lpdp.gaps.some((g) => g.includes("IELTS")));
 });
 
 test("search profile never carries identity fields", () => {
-  const sent = searchProfile({ ...profile, nama: "X", email: "x@y.z", nim: "123" });
+  const withIdentity = { ...profile, nama: "X", email: "x@y.z", nim: "123" };
+  const sent = searchProfile(withIdentity);
   assert.equal("nama" in sent || "email" in sent || "nim" in sent, false);
 });
 
@@ -286,7 +291,8 @@ test("score equals the sum of its breakdown", () => {
 
 test("country aliases: Hongkong matches LPDP's Hong Kong destination", () => {
   const { results } = matchCatalog({ ...profile, negara_tujuan: "Hongkong" }, "", "2026-11-26");
-  const negara = results.find((r) => r.name.includes("LPDP")).breakdown.find((b) => b.key === "negara");
+  const negara = results.find((r) => r.name.includes("LPDP"))?.breakdown.find((b) => b.key === "negara");
+  assert.ok(negara);
   assert.equal(negara.points, 15);
   assert.match(negara.detail, /Hong Kong/);
 });
@@ -298,6 +304,7 @@ test("achievements score by level, relevance and rank", () => {
   assert.equal(a.rank, 1);
   const { results } = matchCatalog({ ...profile, prestasi: "Juara 2 Lomba Karya Tulis Ilmiah Nasional 2025; Kepala Divisi Himpunan Mahasiswa Elektro" }, "", "2026-11-26");
   const mext = results.find((r) => r.name.startsWith("MEXT"));
+  assert.ok(mext);
   assert.equal(mext.achievements[0].points, 6 + 3 + 1); // nasional + relevant (riset) + juara 2
   assert.deepEqual(mext.achievements[0].relevant, ["riset"]);
 });
@@ -318,6 +325,7 @@ test("profile validation rejects out-of-range IPK", () => {
 });
 
 const LPDP = CATALOG.find((x) => x.name.includes("LPDP"));
+assert.ok(LPDP);
 
 test("coach: rewording options are re-scored and the best one raises the score", () => {
   const me = { ...profile, prestasi: "Asisten Laboratorium Sistem Tenaga Listrik 2024; Ketua panitia bakti sosial desa" };

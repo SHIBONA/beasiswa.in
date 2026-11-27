@@ -3,7 +3,7 @@
 // 2) what rewording cannot change (official numeric gates) and why,
 // 3) what to build next (courses, certifications, experience) with links.
 // Options never add facts: each carries a condition the member must confirm is true.
-import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements, type BreakdownRow } from "./catalog.ts";
+import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements, type BreakdownRow, type Profile, type Scholarship } from "./catalog.ts";
 
 type Link = { title: string; url: string; note: string };
 type CvOption = { text: string; why: string; condition: string; after: number; delta: number };
@@ -11,10 +11,11 @@ type CvEdit = { index: number; original: string; level: string; tags: string[]; 
 type ProfileEdit = { field: string; value: string; label: string; condition: string; after: number; delta: number };
 type HardGap = { title: string; detail: string; quote: string; potential: number; why: string; actions: Link[] };
 type GrowthStep = { area: string; why: string; quote: string; links: Link[] };
+type Fit = ReturnType<typeof scoreScholarship>;
 
 const MAX_OPTIONS = 3;
 const PRESTASI_WEAK = 12;
-const FRAMES = {
+const FRAMES: Record<string, (t: string) => string> = {
   kepemimpinan: (t) => `Memimpin: ${t}`,
   riset: (t) => `Penelitian/karya ilmiah: ${t}`,
   kompetisi: (t) => `Kompetisi: ${t}`,
@@ -24,7 +25,7 @@ const FRAMES = {
 const SCOPES = ["tingkat internasional", "tingkat nasional", "tingkat provinsi", "tingkat kampus"];
 
 // Links checked to respond (HTTP 200) on 2026-11-26; entries without url are advice only.
-const GROWTH = {
+const GROWTH: Record<string, Link[]> = {
   bahasa: [
     { title: "Tes & persiapan IELTS (IDP Indonesia)", url: "https://ielts.idp.com/indonesia", note: "Jadwal tes dan materi latihan resmi." },
     { title: "TOEFL iBT (ETS)", url: "https://www.ets.org/toefl.html", note: "Alternatif IELTS; cek apakah program menerima TOEFL." },
@@ -65,14 +66,14 @@ const FIELD_COURSES = [
   { match: /cloud|informatika|software|web|komputer/i, title: "AWS Skill Builder", url: "https://skillbuilder.aws/", note: "Kursus cloud dan jalur sertifikasi AWS." },
 ];
 
-const fmt = (n) => Number(n).toFixed(2).replace(".", ",");
-const row = (fit, key) => fit.breakdown.find((b) => b.key === key);
-const joinItems = (items) => items.join("; ");
+const fmt = (n: number) => Number(n).toFixed(2).replace(".", ",");
+const row = (fit: Fit, key: string) => fit.breakdown.find((b) => b.key === key);
+const joinItems = (items: string[]) => items.join("; ");
 
-function cvEditsFor(profile, notes, program, base) {
+function cvEditsFor(profile: Profile, notes: string, program: Scholarship, base: Fit) {
   const items = splitAchievements(profile.prestasi);
   const values = program.values ?? [];
-  const rescore = (prestasi) => scoreScholarship({ ...profile, prestasi }, notes, program).score;
+  const rescore = (prestasi: string) => scoreScholarship({ ...profile, prestasi }, notes, program).score;
   const edits: CvEdit[] = [];
   items.forEach((text, i) => {
     const a = classifyAchievement(text);
@@ -101,8 +102,8 @@ function cvEditsFor(profile, notes, program, base) {
   return { items, edits };
 }
 
-function profileEditsFor(profile, notes, program, base) {
-  const rescore = (patch) => scoreScholarship({ ...profile, ...patch }, notes, program).score;
+function profileEditsFor(profile: Profile, notes: string, program: Scholarship, base: Fit) {
+  const rescore = (patch: Partial<Profile>) => scoreScholarship({ ...profile, ...patch }, notes, program).score;
   const edits: ProfileEdit[] = [];
   const bidang = row(base, "bidang");
   if (bidang && bidang.points < bidang.max && !program.fields.includes("semua")) {
@@ -122,9 +123,9 @@ function profileEditsFor(profile, notes, program, base) {
   return edits;
 }
 
-function hardGapsFor(profile, notes, program, base) {
+function hardGapsFor(profile: Profile, notes: string, program: Scholarship, base: Fit) {
   const gaps: HardGap[] = [];
-  const potential = (patchProfile, patchProgram = {}) => scoreScholarship({ ...profile, ...patchProfile }, notes, { ...program, ...patchProgram }).score - base.score;
+  const potential = (patchProfile: Partial<Profile>, patchProgram: Partial<Scholarship> = {}) => scoreScholarship({ ...profile, ...patchProfile }, notes, { ...program, ...patchProgram }).score - base.score;
   const ipk = row(base, "ipk");
   if (program.min_gpa && ipk?.points === 0) {
     gaps.push({
@@ -158,7 +159,7 @@ function hardGapsFor(profile, notes, program, base) {
   return gaps;
 }
 
-function growthFor(profile, program, base) {
+function growthFor(profile: Profile, program: Scholarship, base: Fit) {
   const prestasi = row(base, "prestasi");
   const values = program.values ?? [];
   const criteria = program.evidence?.kriteria ?? [];
@@ -175,14 +176,14 @@ function growthFor(profile, program, base) {
   return plan;
 }
 
-export function coachFor(profile, notes, program) {
+export function coachFor(profile: Profile, notes: string, program: Scholarship) {
   const base = scoreScholarship(profile, notes, program);
   const { items, edits } = cvEditsFor(profile, notes, program, base);
   const profileEdits = profileEditsFor(profile, notes, program, base);
   const prestasi = row(base, "prestasi");
   const cvNote = !items.length
     ? "Belum ada prestasi di profil. Tambahkan prestasi nyata dulu (lihat rencana pengembangan)."
-    : prestasi.points >= prestasi.max
+    : prestasi && prestasi.points >= prestasi.max
       ? `Prestasi sudah ${prestasi.points}/${prestasi.max} untuk program ini; mengubah kata tidak menaikkan skor.`
       : edits.length ? "" : "Kalimat prestasimu sudah menyebut tingkat dan kategori yang terbaca. Skor hanya naik dengan prestasi baru.";
   // Best case if every top option is applied together (the cap of 20 for prestasi still holds).
@@ -198,7 +199,7 @@ export function coachFor(profile, notes, program) {
 }
 
 // Re-score a member-edited profile against the same program: per-component before/after.
-export function previewFor(profile, notes, program, patch) {
+export function previewFor(profile: Profile, notes: string, program: Scholarship, patch: Partial<Profile>) {
   const before = scoreScholarship(profile, notes, program);
   const after = scoreScholarship({ ...profile, ...patch }, notes, program);
   // One reference row per component, in first-seen order; the "after" row wins when both have it.
@@ -206,7 +207,7 @@ export function previewFor(profile, notes, program, patch) {
   for (const b of [...before.breakdown, ...after.breakdown]) {
     if (!refs.has(b.key)) refs.set(b.key, after.breakdown.find((x) => x.key === b.key) ?? b);
   }
-  const sum = (fit, key) => fit.breakdown.filter((b) => b.key === key).reduce((s, b) => s + b.points, 0);
+  const sum = (fit: Fit, key: string) => fit.breakdown.filter((b) => b.key === key).reduce((s, b) => s + b.points, 0);
   const rows = [...refs].map(([key, ref]) => (
     { key, label: ref.label, max: ref.max, before: sum(before, key), after: sum(after, key), detail: after.breakdown.find((b) => b.key === key)?.detail ?? "" }
   ));

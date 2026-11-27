@@ -1,5 +1,5 @@
 // Local scholarship search server for one member.
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
@@ -7,7 +7,8 @@ import { fileURLToPath } from "node:url";
 import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.ts";
 import { MAX_CV_CHARS, parseCv } from "./cv.ts";
 import { coachFor, previewFor } from "./coach.ts";
-import { openStore } from "./storage.ts";
+import type { Profile } from "./catalog.ts";
+import { openStore, type Search } from "./storage.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // API keys (FIRECRAWL_API_KEY / ANTHROPIC_API_KEY) live in .env, never in source.
@@ -44,35 +45,39 @@ const SECURITY_HEADERS = {
 
 // Date in Asia/Jakarta, so "today" and the daily quota match the member's calendar.
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
-const applicationDay = ({ target_countries }) => target_countries?.length === 1 && target_countries[0] === "jepang"
+const applicationDay = ({ target_countries }: { target_countries?: string[] }) => target_countries?.length === 1 && target_countries[0] === "jepang"
   ? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : today();
 
 // Errors thrown with a client-safe message (publicMessage) or an HTTP status for the response.
 type PublicError = Error & { status?: number; publicMessage?: string };
 
 let store: ReturnType<typeof openStore>;
-let activeSearch;
+let activeSearch: Search | undefined;
 
-const PROFILE_FIELDS = {
-  jenjang_saat_ini: (v) => ["SMA", "D3", "S1", "S2"].includes(v),
-  jenjang_tujuan: (v) => ["Exchange", "S1", "S2", "S3"].includes(v),
+const PROFILE_FIELDS: Record<keyof Profile, (v: unknown) => boolean> = {
+  jenjang_saat_ini: (v) => typeof v === "string" && ["SMA", "D3", "S1", "S2"].includes(v),
+  jenjang_tujuan: (v) => typeof v === "string" && ["Exchange", "S1", "S2", "S3"].includes(v),
   prodi: (v) => typeof v === "string" && v.length <= 100,
   ipk: (v) => typeof v === "number" && v >= 0 && v <= 4,
-  semester: (v) => Number.isInteger(v) && v >= 1 && v <= 14,
+  semester: (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 14,
   negara_tujuan: (v) => typeof v === "string" && v.length <= 200,
   bidang_minat: (v) => typeof v === "string" && v.length <= 200,
   skor_bahasa: (v) => typeof v === "number" && v >= 0 && v <= 9,
   prestasi: (v) => typeof v === "string" && v.length <= 500,
   butuh_pendanaan: (v) => typeof v === "boolean",
 };
+const isProfileField = (key: string): key is keyof Profile => Object.hasOwn(PROFILE_FIELDS, key);
 
-export function validateProfile(body) {
+type Json = Record<string, unknown>;
+
+export function validateProfile(body: Json): { errors: string[]; profile?: undefined } | { profile: Profile; errors?: undefined } {
   const errors = Object.entries(PROFILE_FIELDS).filter(([k, ok]) => !ok(body?.[k])).map(([k]) => k);
-  return errors.length ? { errors } : { profile: Object.fromEntries(Object.keys(PROFILE_FIELDS).map((k) => [k, body[k]])) };
+  // Every field passed its validator above, so the copied object is a complete Profile.
+  return errors.length ? { errors } : { profile: Object.fromEntries(Object.keys(PROFILE_FIELDS).map((k) => [k, body[k]])) as Profile };
 }
 
 // PRD S7: 5 searches/day, 1 running; failed searches do not count (S8).
-export function checkQuota(searches, day, now = new Date(), deletedUsed = 0) {
+export function checkQuota(searches: { day: string; status: string }[], day: string, now = new Date(), deletedUsed = 0) {
   if (searches.some((s) => s.status === "queued" || s.status === "running")) {
     return { error: "Masih ada 1 pencarian berjalan. Tunggu sampai selesai.", retry_after: RUNNING_RETRY_SECONDS };
   }
@@ -83,17 +88,17 @@ export function checkQuota(searches, day, now = new Date(), deletedUsed = 0) {
   return null;
 }
 
-function secondsUntilTomorrow(day, now = new Date()) {
+function secondsUntilTomorrow(day: string, now = new Date()) {
   const midnight = new Date(`${day}T00:00:00+07:00`).getTime() + 86_400_000;
   return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
 }
 
-function quotaLeft(day) {
+function quotaLeft(day: string) {
   const used = store.quotaSearches(day).filter((s) => s.day === day && s.status !== "failed").length;
   return Math.max(0, DAILY_QUOTA - used - store.count("deleted", day));
 }
 
-async function startSearch(search, profile) {
+async function startSearch(search: Search, profile: Profile) {
   const started = Date.now();
   activeSearch = search;
   try {
@@ -120,7 +125,7 @@ async function startSearch(search, profile) {
   }
 }
 
-async function readJson(req, limit = MAX_BODY_BYTES) {
+async function readJson(req: IncomingMessage, limit = MAX_BODY_BYTES): Promise<Json> {
   if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") {
     throw Object.assign(new Error("Gunakan Content-Type application/json."), { status: 415 });
   }
@@ -143,12 +148,12 @@ async function readJson(req, limit = MAX_BODY_BYTES) {
   }
 }
 
-function send(res, status, body, headers = {}) {
+function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...headers });
   res.end(JSON.stringify(body));
 }
 
-async function api(req, res, path) {
+async function api(req: IncomingMessage, res: ServerResponse, path: string) {
   const [, , resource, id, action, extra] = path.split("/");
   const method = req.method;
   if (extra !== undefined || id === "" || action === "") return send(res, 404, { error: "Endpoint tidak ada." });
@@ -161,10 +166,10 @@ async function api(req, res, path) {
   if (resource === "profile" && !id) {
     if (method === "GET") return send(res, 200, { profile: store.profile() });
     if (method === "PUT") {
-      const { profile, errors } = validateProfile(await readJson(req));
-      if (errors) return send(res, 422, { error: "Data profil tidak valid", fields: errors });
-      store.setProfile(profile);
-      return send(res, 200, { profile });
+      const checked = validateProfile(await readJson(req));
+      if (checked.errors) return send(res, 422, { error: "Data profil tidak valid", fields: checked.errors });
+      store.setProfile(checked.profile);
+      return send(res, 200, { profile: checked.profile });
     }
   }
 
@@ -174,7 +179,7 @@ async function api(req, res, path) {
     if (text.length > MAX_CV_CHARS) return send(res, 413, { error: "CV terlalu panjang." });
     const { fields, source } = await parseCv(text, today());
     // Only values that pass the profile validators reach the form.
-    const valid = Object.fromEntries(Object.entries(fields).filter(([k, v]) => Object.hasOwn(PROFILE_FIELDS, k) && PROFILE_FIELDS[k](v)));
+    const valid = Object.fromEntries(Object.entries(fields).filter(([k, v]) => isProfileField(k) && PROFILE_FIELDS[k](v)));
     return send(res, 200, { fields: valid, source });
   }
 
@@ -187,7 +192,7 @@ async function api(req, res, path) {
       if (typeof notes !== "string" || notes.length > 300) return send(res, 422, { error: "Catatan maksimal 300 karakter." });
       const day = today();
       const mode = agentMode();
-      const search: Record<string, any> = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      const search: Search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
       if (mode === "firecrawl") search.target_countries = firecrawlDestinations(profile, notes);
       const blocked = store.transaction(() => {
         const quota = checkQuota(store.quotaSearches(day), day, new Date(), store.count("deleted", day));
@@ -235,11 +240,12 @@ async function api(req, res, path) {
     if (method === "GET" && !action) return send(res, 200, { result_id: resultId, saved_only: savedOnly, ...coachFor(profile, notes, result.program) });
     if (method === "POST" && action === "preview") {
       const body = await readJson(req);
-      const patch = {};
+      const patch: Partial<Profile> = {};
       for (const [key, max] of [["prestasi", 500], ["bidang_minat", 200], ["negara_tujuan", 200]] as const) {
-        if (body[key] === undefined) continue;
-        if (typeof body[key] !== "string" || body[key].length > max) return send(res, 422, { error: `${key} maksimal ${max} karakter.` });
-        patch[key] = body[key];
+        const value = body[key];
+        if (value === undefined) continue;
+        if (typeof value !== "string" || value.length > max) return send(res, 422, { error: `${key} maksimal ${max} karakter.` });
+        patch[key] = value;
       }
       return send(res, 200, previewFor(profile, notes, result.program, patch));
     }
@@ -265,7 +271,7 @@ async function api(req, res, path) {
   return send(res, 404, { error: "Endpoint tidak ada." });
 }
 
-function decodeId(id) {
+function decodeId(id: string) {
   try {
     return decodeURIComponent(id);
   } catch {
@@ -273,7 +279,7 @@ function decodeId(id) {
   }
 }
 
-async function serveStatic(req, res, path) {
+async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
   const asset = STATIC_FILES.get(path);
   if (!asset) return send(res, 404, { error: "Halaman tidak ditemukan." });
   if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, { error: "Metode tidak didukung." }, { Allow: "GET, HEAD" });

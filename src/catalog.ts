@@ -1,7 +1,28 @@
 // Demo-mode catalog: real programs and official sites, but deadlines and thresholds are
 // EXAMPLE values for the demo video. Live mode (ANTHROPIC_API_KEY set) searches the web instead.
 // values = what the program rewards in achievements: riset, kompetisi, kepemimpinan, akademik, sosial.
-export const CATALOG = [
+
+// The member's saved profile, as validated by the server.
+export type Profile = {
+  jenjang_saat_ini: string; jenjang_tujuan: string; prodi: string; ipk: number; semester: number;
+  negara_tujuan: string; bidang_minat: string; skor_bahasa: number; prestasi: string; butuh_pendanaan: boolean;
+};
+export type Criterion = { text: string; quote: string };
+// Sentences verified on the official page (Firecrawl mode); empty when not found.
+export type Evidence = {
+  jenjang: string; lokasi: string; pembukaan: string; ipk: string; bahasa: string;
+  deadline: string; pendanaan: string; kerja: string; kriteria: Criterion[];
+};
+// Program facts from the demo catalog or extracted from the web; the scorer reads only these.
+export type Scholarship = {
+  name: string; provider: string; country: string; countries: string[]; levels: string[]; funding: string;
+  deadline: string; url: string; requirements: string; fields: string[]; values: string[];
+  min_gpa?: number; ielts?: number; min_sem?: number; max_sem?: number; work_years?: number; need_based?: boolean;
+  evidence?: Evidence; official?: boolean; source?: string;
+  opens_at?: string; application_status?: string; source_checked_at?: string;
+};
+
+export const CATALOG: Scholarship[] = [
   { name: "Beasiswa LPDP Reguler", provider: "LPDP, Kementerian Keuangan RI", country: "Indonesia & luar negeri", countries: ["indonesia", "jepang", "inggris", "australia", "jerman", "amerika serikat", "belanda", "korea selatan", "hong kong", "singapura", "tiongkok", "taiwan", "prancis", "swedia", "kanada", "selandia baru"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-03-31", url: "https://lpdp.kemenkeu.go.id/", min_gpa: 3.0, ielts: 6.5, fields: ["semua"], values: ["kepemimpinan", "sosial", "riset"], requirements: "IPK min 3,00 (S2); IELTS 6.5 untuk luar negeri; kampus tujuan ada di daftar PT LPDP; komitmen kembali ke Indonesia." },
   { name: "MEXT Research Student Scholarship", provider: "Kedutaan Besar Jepang di Indonesia", country: "Jepang", countries: ["jepang"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-04-15", url: "https://www.id.emb-japan.go.jp/sch.html", min_gpa: 3.0, ielts: 6.0, fields: ["semua"], values: ["riset", "akademik"], requirements: "Usia < 35 tahun; IPK min 3,00; rencana riset; ujian tulis Bahasa Inggris/Jepang." },
   { name: "Chevening Scholarship", provider: "Pemerintah Inggris (FCDO)", country: "Inggris", countries: ["inggris"], levels: ["S2"], funding: "Penuh", deadline: "2027-11-04", url: "https://www.chevening.org/scholarships/", min_gpa: 3.0, ielts: 6.5, work_years: 2, fields: ["semua"], values: ["kepemimpinan", "sosial"], requirements: "Pengalaman kerja min 2 tahun; daftar 3 program studi di Inggris; potensi kepemimpinan." },
@@ -29,27 +50,27 @@ export const CATALOG = [
   { name: "Beasiswa BCA Finance (periode lalu)", provider: "BCA Finance", country: "Indonesia", countries: ["indonesia"], levels: ["S1"], funding: "Sebagian", deadline: "2026-09-30", url: "https://www.bcafinance.co.id/", min_gpa: 3.0, fields: ["semua"], values: ["akademik"], requirements: "Mahasiswa aktif S1; IPK min 3,00." },
 ];
 
-export const WEIGHTS = { ipk: 25, bahasa: 15, negara: 20, prestasi: 20, bidang: 10, pendanaan: 10 };
+export const WEIGHTS: Record<string, number> = { ipk: 25, bahasa: 15, negara: 20, prestasi: 20, bidang: 10, pendanaan: 10 };
 
 const ALIASES = new Map(Object.entries({ hongkong: "hong kong", hk: "hong kong", usa: "amerika serikat", us: "amerika serikat", amerika: "amerika serikat", uk: "inggris", "united kingdom": "inggris", korea: "korea selatan", china: "tiongkok", cina: "tiongkok", singapore: "singapura", japan: "jepang", "new zealand": "selandia baru", nz: "selandia baru", netherlands: "belanda", germany: "jerman", taiwan: "taiwan" }));
-const norm = (s) => String(s ?? "").toLowerCase().trim();
-const country = (c) => ALIASES.get(norm(c)) ?? norm(c);
-const list = (s) => (Array.isArray(s) ? s : String(s ?? "").split(",")).map(norm).filter(Boolean);
-const fmt = (n, d = 2) => Number(n).toFixed(d).replace(".", ",");
+const norm = (s: unknown) => String(s ?? "").toLowerCase().trim();
+const country = (c: string) => ALIASES.get(norm(c)) ?? norm(c);
+const list = (s: unknown) => (Array.isArray(s) ? s : String(s ?? "").split(",")).map(norm).filter(Boolean);
+const fmt = (n: number, d = 2) => Number(n).toFixed(d).replace(".", ",");
 const KNOWN_COUNTRIES = [...new Set(CATALOG.flatMap((s) => s.countries))];
 
-function countriesInNotes(notes) {
+function countriesInNotes(notes: string) {
   const text = norm(notes);
   return [...KNOWN_COUNTRIES, ...ALIASES.keys()].filter((c) => c.length > 3 && new RegExp(`\\b${c}\\b`).test(text)).map(country);
 }
 
 // Return only catalog labels before using free-form profile fields in a provider query.
-export function discoveryCountries(destination, notes) {
+export function discoveryCountries(destination: string, notes: string) {
   const requested = new Set([...list(destination).map(country), ...countriesInNotes(notes)]);
   return [...requested].filter((c) => KNOWN_COUNTRIES.includes(c)).slice(0, 3);
 }
 
-export function isExpired(deadline, today) {
+export function isExpired(deadline: string, today: string) {
   return Boolean(deadline) && deadline < today;
 }
 
@@ -70,17 +91,20 @@ const CATEGORIES = {
 const RANK = /\b(juara 1|juara i\b|winner|gold|first place|champion|medali emas)/i;
 const PODIUM = /\b(juara [23]|juara (ii|iii)\b|runner[- ]up|silver|bronze|medali perak|medali perunggu|harapan)/i;
 
-export function classifyAchievement(text) {
+export function classifyAchievement(text: string) {
   const level = LEVELS.find((l) => l.re.test(text)) ?? { name: "Lainnya", pts: 2 };
-  const tags = Object.keys(CATEGORIES).filter((k) => CATEGORIES[k].test(text));
+  const tags = Object.entries(CATEGORIES).filter(([, re]) => re.test(text)).map(([k]) => k);
   const rank = RANK.test(text) ? 2 : PODIUM.test(text) ? 1 : 0;
   return { text, level: level.name, levelPts: level.pts, tags, rank };
 }
 
-export const splitAchievements = (s) => String(s ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
+export const splitAchievements = (s: unknown) => String(s ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
 
-function scoreAchievements(items, values) {
-  const scored = items.map((a) => {
+type Achievement = ReturnType<typeof classifyAchievement>;
+type ScoredAchievement = { text: string; level: string; relevant: string[]; points: number };
+
+function scoreAchievements(items: Achievement[], values: string[]) {
+  const scored = items.map((a): ScoredAchievement => {
     const relevant = a.tags.filter((t) => values.includes(t));
     const points = relevant.length ? a.levelPts + 3 + a.rank : Math.round(a.levelPts / 2);
     return { text: a.text, level: a.level, relevant, points };
@@ -89,14 +113,14 @@ function scoreAchievements(items, values) {
 }
 
 // ---------- Score: 6 weighted components + penalties, all shown to the member ----------
-export function opensLevel(levels, targetLevel) {
+export function opensLevel(levels: string[], targetLevel: string) {
   const target = norm(targetLevel);
   return levels.some((level) => target === "exchange" ? norm(level).startsWith("exchange") : norm(level) === target);
 }
 
 export type BreakdownRow = { key: string; label: string; points: number; max: number; detail: string; rule: string; quote: string };
 
-export function scoreScholarship(profile, notes, s) {
+export function scoreScholarship(profile: Profile, notes: string, s: Scholarship) {
   const levelOk = opensLevel(s.levels, profile.jenjang_tujuan);
 
   const notesText = norm(notes);
@@ -107,17 +131,17 @@ export function scoreScholarship(profile, notes, s) {
   const needFunding = Boolean(profile.butuh_pendanaan) || /fully funded|penuh/.test(notesText);
   const fields = list(profile.bidang_minat).concat(list(profile.prodi));
   const values = s.values ?? [];
-  const ev = s.evidence ?? {};
+  const ev: Partial<Evidence> = s.evidence ?? {};
   const breakdown: BreakdownRow[] = [];
   const reasons: string[] = levelOk ? [`Membuka jenjang ${s.levels.join("/")}, sesuai tujuanmu ${profile.jenjang_tujuan}`] : [];
   const gaps: string[] = [];
   // rule = how the points are computed; quote = sentence verified on the official page (Firecrawl mode).
-  const add = (key, label, points, detail, good, rule, quote = "") => {
+  const add = (key: string, label: string, points: number, detail: string, good: boolean, rule: string, quote = "") => {
     breakdown.push({ key, label, points, max: WEIGHTS[key] ?? 0, detail, rule, quote });
     (good ? reasons : gaps).push(detail);
   };
 
-  const gpaRule = (min) => `Syarat administrasi IPK minimal ${fmt(min)}. Memenuhi = 15 poin + 0–10 sesuai selisih (penuh pada +0,50). Di bawah syarat = 0, karena berkas gugur di seleksi administrasi.`;
+  const gpaRule = (min: number) => `Syarat administrasi IPK minimal ${fmt(min)}. Memenuhi = 15 poin + 0–10 sesuai selisih (penuh pada +0,50). Di bawah syarat = 0, karena berkas gugur di seleksi administrasi.`;
   if (s.min_gpa) {
     if (gpa >= s.min_gpa) {
       const margin = gpa - s.min_gpa;
@@ -125,7 +149,7 @@ export function scoreScholarship(profile, notes, s) {
     } else add("ipk", "IPK", 0, `IPK kurang ${fmt(s.min_gpa - gpa)} (punya ${fmt(gpa)}, minimal ${fmt(s.min_gpa)})`, false, gpaRule(s.min_gpa), ev.ipk);
   } else add("ipk", "IPK", 18, "Tidak ada syarat IPK minimal tertulis", true, "Penyelenggara tidak menulis IPK minimal, jadi diberi nilai netral 18 dari 25.");
 
-  const langRule = (req) => `Syarat bahasa IELTS ${req} (atau setara). Memenuhi = 10 poin + 0–5 jika melebihi (penuh pada +1,0). Di bawah syarat = 0, karena sertifikat bahasa adalah dokumen wajib.`;
+  const langRule = (req: number) => `Syarat bahasa IELTS ${req} (atau setara). Memenuhi = 10 poin + 0–5 jika melebihi (penuh pada +1,0). Di bawah syarat = 0, karena sertifikat bahasa adalah dokumen wajib.`;
   if (s.ielts) {
     if (ielts >= s.ielts) {
       const extra = ielts - s.ielts;
@@ -167,7 +191,7 @@ export function scoreScholarship(profile, notes, s) {
   // [points, detail, rule, quote]
   const penalties: [number, string, string, string][] = [];
   if (!levelOk) penalties.push([30, s.levels.length ? `Tidak membuka jenjang ${profile.jenjang_tujuan} (hanya ${s.levels.join("/")})` : "Jenjang program tidak tertulis di halaman", "Jenjang adalah syarat mutlak; program untuk jenjang lain tetap ditampilkan sebagai referensi.", ""]);
-  if (s.min_sem && (semester < s.min_sem || semester > s.max_sem)) penalties.push([15, `Khusus semester ${s.min_sem === s.max_sem ? s.min_sem : `${s.min_sem}–${s.max_sem}`} (kamu semester ${semester || "?"})`, "Batas semester adalah syarat mutlak; di luar rentang berkas tidak diproses.", ""]);
+  if (s.min_sem && (semester < s.min_sem || semester > (s.max_sem ?? Infinity))) penalties.push([15, `Khusus semester ${s.min_sem === s.max_sem ? s.min_sem : `${s.min_sem}–${s.max_sem}`} (kamu semester ${semester || "?"})`, "Batas semester adalah syarat mutlak; di luar rentang berkas tidak diproses.", ""]);
   if (s.work_years) penalties.push([10, `Butuh pengalaman kerja min ${s.work_years} tahun`, "Pengalaman kerja tidak tercatat di profil mahasiswa, jadi dianggap belum terpenuhi.", ev.kerja ?? ""]);
   if (s.need_based && !profile.butuh_pendanaan) penalties.push([10, "Khusus mahasiswa dari keluarga kurang mampu", "Program berbasis kebutuhan ekonomi; profilmu tidak menandai butuh pendanaan.", ""]);
   for (const [p, text, rule, quote] of penalties) {
@@ -179,12 +203,12 @@ export function scoreScholarship(profile, notes, s) {
   return { score, reasons, gaps, breakdown, achievements: scored, insight: buildInsight(s, breakdown, relevant, values, ev) };
 }
 
-export const VALUE_LABELS = { riset: "riset & karya ilmiah", kompetisi: "prestasi kompetisi", kepemimpinan: "kepemimpinan", akademik: "prestasi akademik", sosial: "kontribusi sosial" };
+export const VALUE_LABELS: Record<string, string> = { riset: "riset & karya ilmiah", kompetisi: "prestasi kompetisi", kepemimpinan: "kepemimpinan", akademik: "prestasi akademik", sosial: "kontribusi sosial" };
 
 // Program-specific explanation by selection stage: administration (hard gates) -> substance -> fit.
-function buildInsight(s, breakdown, relevant, values, ev) {
-  const row = (key) => breakdown.find((b) => b.key === key);
-  const gates = [row("ipk"), row("bahasa")].filter((b) => b && b.max && !/Tidak ada|Tidak mensyaratkan/.test(b.detail));
+function buildInsight(s: Scholarship, breakdown: BreakdownRow[], relevant: ScoredAchievement[], values: string[], ev: Partial<Evidence>) {
+  const row = (key: string) => breakdown.find((b) => b.key === key);
+  const gates = [row("ipk"), row("bahasa")].filter((b) => b !== undefined).filter((b) => b.max && !/Tidak ada|Tidak mensyaratkan/.test(b.detail));
   const failed = [...gates.filter((b) => b.points === 0), ...breakdown.filter((b) => b.key === "penalti")];
   const admin = failed.length
     ? { ok: false, text: `Belum lolos syarat administrasi: ${failed.map((b) => b.detail).join("; ")}. Ini syarat gugur, jadi penuhi dulu sebelum mendaftar.` }
@@ -196,7 +220,7 @@ function buildInsight(s, breakdown, relevant, values, ev) {
     ? { ok: true, text: `${s.name} menilai ${valuesText}. Bukti terkuatmu: ${strongest.join(" dan ")}. Jadikan ini cerita utama di esai dan wawancara.` }
     : { ok: false, text: `${s.name} menilai ${valuesText}. Belum ada prestasimu yang masuk kategori itu; siapkan contoh nyata untuk esai.` };
 
-  const fit = [row("negara"), row("pendanaan"), row("bidang")].filter(Boolean);
+  const fit = [row("negara"), row("pendanaan"), row("bidang")].filter((b) => b !== undefined);
   return [
     { label: "Seleksi administrasi", ...admin },
     { label: "Seleksi substansi", ...substance, quotes: (ev.kriteria ?? []).slice(0, 2) },
@@ -208,7 +232,7 @@ export const MAX_RESULTS = 30;
 const LOCAL_ONLY = /local students only|for local students|permanent (citizens?|residents?)|hksar permanent|khusus warga (negara )?(lokal|setempat)/i;
 
 // Hard limits do not hide a program; they label it and push it below the eligible ones.
-export function limitsOf(s, profile, today) {
+export function limitsOf(s: Scholarship, profile: Profile, today: string) {
   const limits: string[] = [];
   if (!s.levels.length) limits.push("Jenjang tidak tertulis");
   else if (!opensLevel(s.levels, profile.jenjang_tujuan)) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
@@ -219,11 +243,11 @@ export function limitsOf(s, profile, today) {
 }
 
 // Shared by all modes: every program is scored; eligible ones first, then limited ones, best first.
-export function programIdentity({ name, provider, country }) {
+export function programIdentity({ name, provider, country }: { name?: unknown; provider?: unknown; country?: unknown }) {
   return [name, provider, country].map((value) => String(value ?? "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " "));
 }
 
-export function rankScholarships(profile, notes, scholarships, today) {
+export function rankScholarships(profile: Profile, notes: string, scholarships: Scholarship[], today: string) {
   const results = scholarships.map((s) => ({
     name: s.name, provider: s.provider, country: s.country, level: s.levels.join("/") || "Tidak tertulis", funding: s.funding,
     deadline: s.deadline, requirements: s.requirements, url: s.url, source: s.source ?? "demo",
@@ -235,4 +259,6 @@ export function rankScholarships(profile, notes, scholarships, today) {
   return { results: results.slice(0, MAX_RESULTS), expired, eligible: results.filter((r) => !r.limits.length).length };
 }
 
-export const matchCatalog = (profile, notes, today) => rankScholarships(profile, notes, CATALOG, today);
+export type RankedResult = ReturnType<typeof rankScholarships>["results"][number];
+
+export const matchCatalog = (profile: Profile, notes: string, today: string) => rankScholarships(profile, notes, CATALOG, today);
