@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { programIdentity } from "./catalog.ts";
 
 const VERSION = 1;
@@ -72,7 +72,14 @@ function legacyData(path) {
   }
 }
 
-const body = (row) => row ? JSON.parse(row.body) : null;
+// Stored documents are JSON; each column below is typed by the query that selects it.
+type BodyRow = { body: string };
+type HistoryRow = {
+  id: string; created_at: string; status: string; notes: string | null; mode: string | null;
+  error: string | null; count: number; top: string | null;
+};
+
+const body = (row: BodyRow | null) => row ? JSON.parse(row.body) : null;
 const interrupted = (search) => ({
   ...search, status: "failed", error: "Server dimulai ulang saat pencarian berjalan.",
 });
@@ -86,10 +93,9 @@ export function openStore(path, legacyPath) {
   }
   const db = new Database(path, { strict: true });
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
-  // Rows are untyped: each caller reads the columns its own query selects.
-  const get = (sql, ...args): any => db.prepare(sql).get(...args);
-  const all = (sql, ...args): any[] => db.prepare(sql).all(...args);
-  const run = (sql, ...args) => db.prepare(sql).run(...args);
+  const get = <Row>(sql: string, ...args: SQLQueryBindings[]) => db.prepare<Row, SQLQueryBindings[]>(sql).get(...args);
+  const all = <Row>(sql: string, ...args: SQLQueryBindings[]) => db.prepare<Row, SQLQueryBindings[]>(sql).all(...args);
+  const run = (sql: string, ...args: SQLQueryBindings[]) => db.prepare<unknown, SQLQueryBindings[]>(sql).run(...args);
 
   function transaction(work) {
     db.exec("BEGIN IMMEDIATE");
@@ -133,11 +139,11 @@ export function openStore(path, legacyPath) {
     ON CONFLICT(id) DO UPDATE SET body = excluded.body`, JSON.stringify(profile));
   const setCount = (kind, day, count) => run(`INSERT INTO counters VALUES (?, ?, ?)
     ON CONFLICT(kind) DO UPDATE SET day = excluded.day, count = excluded.count`, kind, day, count);
-  const count = (kind, day) => get("SELECT count FROM counters WHERE kind = ? AND day = ?", kind, day)?.count ?? 0;
+  const count = (kind, day) => get<{ count: number }>("SELECT count FROM counters WHERE kind = ? AND day = ?", kind, day)?.count ?? 0;
 
   try {
     transaction(() => {
-      const { user_version: version } = get("PRAGMA user_version");
+      const version = get<{ user_version: number }>("PRAGMA user_version")?.user_version ?? 0;
       if (version > VERSION) throw new Error("Versi penyimpanan lebih baru daripada aplikasi ini.");
       if (version === 0) {
         db.exec(SCHEMA);
@@ -147,7 +153,7 @@ export function openStore(path, legacyPath) {
           saveSearch(["queued", "running"].includes(search.status) ? interrupted(search) : search);
         }
         for (const saved of old?.saved ?? []) {
-          const result = get("SELECT body FROM results WHERE id = ?", saved.id);
+          const result = get<BodyRow>("SELECT body FROM results WHERE id = ?", saved.id);
           const mode = saved.program?.source || saved.source || (saved.program?.official === undefined ? "demo" : "web");
           bookmark(result ? { ...saved, program_id: body(result).program_id } : identify(saved, mode), saved.saved_at);
         }
@@ -156,7 +162,7 @@ export function openStore(path, legacyPath) {
         }
         db.exec("PRAGMA user_version = 1");
       }
-      for (const row of all("SELECT body FROM searches WHERE status IN ('queued', 'running')")) {
+      for (const row of all<BodyRow>("SELECT body FROM searches WHERE status IN ('queued', 'running')")) {
         saveSearch({ ...interrupted(body(row)), results: [] });
       }
     });
@@ -168,36 +174,36 @@ export function openStore(path, legacyPath) {
   return {
     transaction,
     close: () => db.close(),
-    profile: () => body(get("SELECT body FROM profile WHERE id = 1")),
+    profile: () => body(get<BodyRow>("SELECT body FROM profile WHERE id = 1")),
     setProfile,
     count,
     increment: (kind, day) => setCount(kind, day, count(kind, day) + 1),
-    quotaSearches: (day) => all(`SELECT day, status FROM searches WHERE day = ?
+    quotaSearches: (day) => all<{ day: string; status: string }>(`SELECT day, status FROM searches WHERE day = ?
       UNION ALL SELECT day, status FROM searches WHERE day <> ? AND status IN ('queued', 'running')`, day, day),
     saveSearch,
-    history: () => all(`SELECT s.id, json_extract(s.body, '$.created_at') AS created_at,
+    history: () => all<HistoryRow>(`SELECT s.id, json_extract(s.body, '$.created_at') AS created_at,
       s.status, json_extract(s.body, '$.notes') AS notes, json_extract(s.body, '$.mode') AS mode,
       json_extract(s.body, '$.error') AS error,
       (SELECT count(*) FROM results WHERE search_id = s.id) AS count,
       (SELECT json_extract(body, '$.name') FROM results WHERE search_id = s.id AND rank = 0) AS top
       FROM searches s ORDER BY s.rowid DESC`),
     search: (id) => {
-      const search = body(get("SELECT body FROM searches WHERE id = ?", id));
-      return search && { ...search, results: all("SELECT body FROM results WHERE search_id = ? ORDER BY rank", id).map(body) };
+      const search = body(get<BodyRow>("SELECT body FROM searches WHERE id = ?", id));
+      return search && { ...search, results: all<BodyRow>("SELECT body FROM results WHERE search_id = ? ORDER BY rank", id).map(body) };
     },
     removeSearch: (id) => run("DELETE FROM searches WHERE id = ?", id),
-    saved: () => all("SELECT body FROM bookmarks ORDER BY rowid DESC").map(body),
-    savedIds: (searchId) => all(`SELECT r.id FROM results r JOIN bookmarks b USING (program_id)
+    saved: () => all<BodyRow>("SELECT body FROM bookmarks ORDER BY rowid DESC").map(body),
+    savedIds: (searchId) => all<{ id: string }>(`SELECT r.id FROM results r JOIN bookmarks b USING (program_id)
       WHERE r.search_id = ? ORDER BY r.rank`, searchId).map((row) => row.id),
     lookup: (id) => {
-      const row = get(`SELECT r.body, json_extract(s.body, '$.notes') AS notes FROM results r
+      const row = get<BodyRow & { notes: string | null }>(`SELECT r.body, json_extract(s.body, '$.notes') AS notes FROM results r
         JOIN searches s ON s.id = r.search_id WHERE r.id = ?`, id);
       if (row) return { result: body(row), notes: row.notes ?? "", savedOnly: false };
-      return { result: body(get("SELECT body FROM bookmarks WHERE result_id = ?", id)), notes: "", savedOnly: true };
+      return { result: body(get<BodyRow>("SELECT body FROM bookmarks WHERE result_id = ?", id)), notes: "", savedOnly: true };
     },
     bookmark,
     removeBookmark: (id) => run("DELETE FROM bookmarks WHERE program_id = ?", id),
-    readSource: (url, cutoff) => body(get("SELECT body FROM source_cache WHERE url = ? AND checked_at >= ?", url, cutoff)),
+    readSource: (url, cutoff) => body(get<BodyRow>("SELECT body FROM source_cache WHERE url = ? AND checked_at >= ?", url, cutoff)),
     writeSource: (url, checkedAt, entries, cutoff) => transaction(() => {
       run("DELETE FROM source_cache WHERE checked_at < ?", cutoff);
       run(`INSERT INTO source_cache VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE

@@ -50,7 +50,7 @@ const applicationDay = ({ target_countries }) => target_countries?.length === 1 
 // Errors thrown with a client-safe message (publicMessage) or an HTTP status for the response.
 type PublicError = Error & { status?: number; publicMessage?: string };
 
-let store;
+let store: ReturnType<typeof openStore>;
 let activeSearch;
 
 const PROFILE_FIELDS = {
