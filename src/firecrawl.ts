@@ -116,9 +116,13 @@ export async function pool<T, R extends object>(items: T[], limit: number, task:
 
 const clean = (text: unknown) => String(text ?? "").normalize("NFKC").toLowerCase().replace(/[*_`#|>\\[\]()]/g, " ").replace(/\s+/g, " ").trim();
 
+// The extractor often wraps a quote in quote marks or trims it with an ellipsis; neither is page text.
+const unwrap = (quote: string) => quote.replace(/^(?:\s|["“”'‘’「『]|\.{3}|…)+|(?:\s|["“”'‘’」』]|\.{3}|…)+$/g, "");
+
 // A quote counts only if it is really on the page (anti-hallucination, PRD risk 11).
 export function verifyQuote(quote: unknown, markdown: string) {
   if (typeof quote !== "string" || quote.length > 1000) return "";
-  const q = clean(quote);
-  return q.length >= MIN_QUOTE_CHARS && clean(markdown).includes(q) ? String(quote).trim() : "";
+  const text = unwrap(quote);
+  const q = clean(text);
+  return q.length >= MIN_QUOTE_CHARS && clean(markdown).includes(q) ? text : "";
 }

@@ -319,16 +319,19 @@ const DEGREE_TERMS: Record<string, RegExp> = {
   Exchange: /\b(?:exchange|pertukaran)\b/i,
 };
 
+// Verified quotes are page text, so they can keep markdown emphasis such as _master_ or *di Jepang*.
+const plain = (quote: string) => quote.replace(/[*_]+/g, " ").replace(/\s+/g, " ");
+
 function mentionsStudyLevel(quote: string, target: string) {
   // Remove mentions of a previous qualification, preserving a separate funded degree in the same sentence.
   const degree = `(?:${DEGREE_TERMS[target].source})`;
   const prerequisite = new RegExp(`(?:lulusan|telah menyelesaikan|memiliki (?:gelar|ijazah)|hold(?:ing)?|already have)\\s+(?:(?:program|pendidikan|studi|gelar|an?)\\s+)*${degree}|${degree}(?:\\s+degree)?\\s+(?:is required for admission|is a prerequisite)`, "gi");
-  return DEGREE_TERMS[target].test(quote.replace(prerequisite, ""));
+  return DEGREE_TERMS[target].test(plain(quote).replace(prerequisite, ""));
 }
 
 export function hasAwardEvidence(evidence: Pick<Evidence, "jenjang" | "pendanaan">) {
   return /\b(?:beasiswa|scholarships?|fellowships?|stipends?|membiayai|dibiayai|ditanggung|tunjangan|funded|funding|tuition (?:fee )?(?:waiver|exemption)|financial (?:aid|support)|bantuan (?:biaya|pendidikan))\b|奨学金|授業料免除/i
-    .test(`${evidence.jenjang} ${evidence.pendanaan}`);
+    .test(plain(`${evidence.jenjang} ${evidence.pendanaan}`));
 }
 
 function readDateInQuote(value: unknown, quote: string) {
@@ -356,7 +359,7 @@ export function hasOpenApplication(entry: Pick<Scholarship, "opens_at" | "applic
 function matchesStudyDestination(entry: WebScholarship, destinations: string[]) {
   if (!destinations.length) return true;
   const advertised = discoveryCountries(entry.countries.join(","), "");
-  const cite = entry.evidence.lokasi;
+  const cite = plain(entry.evidence.lokasi);
   return Boolean(cite) && destinations.some((place) =>
     advertised.includes(place) && (place !== "jepang" || /\b(?:in japan|di jepang)\b|日本(?:で|の|国内|にある)/i.test(cite)));
 }
@@ -365,20 +368,36 @@ export async function readTargetPage(url: string, target: string, destinations: 
   const prompt = `${FC_PROMPT} Cari beasiswa jenjang ${target} (S1 sarjana, S2 magister, S3 doktor, Exchange pertukaran) untuk negara studi ${destinations.join(", ") || "mana saja"}. Tanggal saat ini ${today}. Utamakan pendaftaran yang sedang berlangsung. Untuk setiap hasil, kutip lokasi kampus dan tanggal mulai serta tanggal tutup pendaftaran beasiswa untuk jalur dan periode yang sama. Pilih kutipan yang memuat hari, bulan dan tahun. Jika tanggal mulai tidak disebut, kutip pernyataan bahwa pendaftaran sedang dibuka untuk periode tersebut. Jangan gunakan jadwal pengumuman, pendaftaran reguler kampus atau periode lama. Untuk program di Jepang, kutip bahwa studi berlangsung di Jepang.`;
   const { json, markdown, finalUrl } = await scrapeJson(url, FC_SCHEMA, prompt);
   const checkedAt = new Date().toISOString();
-  const entries = toEntries(json, markdown, finalUrl).filter((entry) => {
-    const quote = entry.evidence.jenjang;
-    if (!opensLevel(entry.levels, target) || !mentionsStudyLevel(quote, target) || !hasAwardEvidence(entry.evidence) ||
-        !matchesStudyDestination(entry, destinations) || !readDateInQuote(entry.deadline, entry.evidence.deadline)) return false;
-    const opens = entry.evidence.pembukaan;
-    const openEvidence = entry.opens_at ? readDateInQuote(entry.opens_at, opens) :
-      entry.application_status === "open" &&
-      /\b(?:applications? (?:is |are )?(?:(?:now|currently) )?open|pendaftaran (?:sedang |telah |resmi )?dibuka)\b|受付中|募集中/i.test(opens) &&
-      !/\b(?:not|will|soon|mulai|akan|belum|ditutup|closed)\b|受付終了|募集終了/i.test(opens);
-    if (!openEvidence) return false;
-    // A degree quoted for another scholarship on a directory page cannot support this card.
-    return json.page_type === "program" || quote.toLowerCase().includes(entry.name.toLowerCase());
-  }).map((entry) => ({ ...entry, source_checked_at: checkedAt }));
-  return { entries, checkedAt, finalUrl, quotes: askedQuotes(json) };
+  const reviewed = toEntries(json, markdown, finalUrl).map((entry) => ({ entry, reason: missingEvidence(entry, record(json).page_type, target, destinations) }));
+  const entries = reviewed.filter(({ reason }) => !reason).map(({ entry }) => ({ ...entry, source_checked_at: checkedAt }));
+  const rejected = reviewed.flatMap(({ entry, reason }) => (reason ? [{ name: entry.name, reason }] : []));
+  return { entries, rejected, checkedAt, finalUrl, quotes: askedQuotes(json) };
+}
+
+// The first piece of evidence a card needs but the page does not quote, or "" when it has all of them.
+export function missingEvidence(entry: WebScholarship, pageType: unknown, target: string, destinations: string[]) {
+  const quote = entry.evidence.jenjang;
+  if (!opensLevel(entry.levels, target)) return `jenjang ${target} tidak tercantum`;
+  if (!mentionsStudyLevel(quote, target)) return `kutipan tidak menyebut jenjang ${target}`;
+  if (!hasAwardEvidence(entry.evidence)) return "tanpa bukti beasiswa atau bantuan biaya";
+  if (!matchesStudyDestination(entry, destinations)) return "lokasi studi tidak terbukti";
+  if (!readDateInQuote(entry.deadline, entry.evidence.deadline)) return "tanggal tutup tidak terkutip lengkap";
+  const opens = entry.evidence.pembukaan;
+  const openEvidence = entry.opens_at ? readDateInQuote(entry.opens_at, opens) :
+    entry.application_status === "open" &&
+    /\b(?:applications? (?:is |are )?(?:(?:now|currently) )?open|pendaftaran (?:sedang |telah |resmi )?dibuka)\b|受付中|募集中/i.test(opens) &&
+    !/\b(?:not|will|soon|mulai|akan|belum|ditutup|closed)\b|受付終了|募集終了/i.test(opens);
+  if (!openEvidence) return "tanggal buka atau status pendaftaran tidak terbukti";
+  // A degree quoted for another scholarship on a directory page cannot support this card.
+  if (pageType !== "program" && !quote.toLowerCase().includes(entry.name.toLowerCase())) return "bukti jenjang milik program lain";
+  return "";
+}
+
+// "2 lokasi studi tidak terbukti, 1 tanggal tutup tidak terkutip lengkap"
+function rejectionSummary(rejected: { reason: string }[]) {
+  const counts = new Map<string, number>();
+  for (const { reason } of rejected) counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  return [...counts].map(([reason, n]) => `${n} ${reason}`).join(", ");
 }
 
 // Shapes one extracted scholarship into a catalog-like entry; numbers stay, quotes only when found on the page.
@@ -470,26 +489,36 @@ async function runFirecrawl(p: Profile, notes: string, onStep: Step, today: stri
     }
     scrapeRequests += 1;
     const pageData = await readTargetPage(page.url, target, destinations, today);
-    const { finalUrl, checkedAt, entries } = pageData;
+    const { finalUrl, checkedAt, entries, rejected } = pageData;
     const host = hostOf(finalUrl);
-    if (!entries.length) { onStep(`Membaca ${host} → belum ada kandidat dengan bukti yang cukup`); return []; }
+    if (!entries.length) {
+      onStep(rejected.length
+        ? `Membaca ${host} → ${rejected.length} program terbaca, belum ada yang berbukti lengkap: ${rejectionSummary(rejected)}`
+        : `Membaca ${host} → tidak ada program beasiswa yang terbaca di halaman ini`);
+      return [];
+    }
     sourceCache?.writeSource(key, checkedAt, entries, cutoff);
     const ok = entries.reduce((n, e) => n + quoteCount(e), 0);
+    const others = rejected.length ? ` · ${rejected.length} lainnya kurang bukti: ${rejectionSummary(rejected)}` : "";
     quotes += pageData.quotes;
     verified += ok;
     if (entries.length > 1) {
-      onStep(`Membaca ${host} → halaman daftar: ${entries.length} beasiswa (${entries.slice(0, 3).map((e) => e.name).join(", ")}${entries.length > 3 ? ", …" : ""}) · ${ok} kutipan terverifikasi`);
+      onStep(`Membaca ${host} → halaman daftar: ${entries.length} beasiswa (${entries.slice(0, 3).map((e) => e.name).join(", ")}${entries.length > 3 ? ", …" : ""}) · ${ok} kutipan terverifikasi${others}`);
     } else {
       const e = entries[0];
       const facts = [e.min_gpa && `IPK ≥ ${fmtGpa(e.min_gpa)}`, e.ielts && `IELTS ≥ ${e.ielts}`, `deadline ${fmtDate(e.deadline)}`].filter(Boolean).join(" · ");
-      onStep(`Membaca ${host} → ${e.name}: ${facts} · ${ok} kutipan terverifikasi`);
+      onStep(`Membaca ${host} → ${e.name}: ${facts} · ${ok} kutipan terverifikasi${others}`);
     }
     return entries;
   });
   const failures = scraped.filter(failed);
   if (failures.length) onStep(`${failures.length} halaman gagal dibaca atau ditolak.`);
   if (pages.length && failures.length === pages.length) throw failures[0].error;
-  const entries = dedupe(scraped.flatMap((r) => failed(r) ? [] : r).filter((entry) => hasOpenApplication(entry, today)));
+  const evidenced = dedupe(scraped.flatMap((r) => failed(r) ? [] : r));
+  const entries = evidenced.filter((entry) => hasOpenApplication(entry, today));
+  if (evidenced.length > entries.length) {
+    onStep(`${evidenced.length - entries.length} kandidat berbukti dilewati karena pendaftarannya belum buka atau sudah tutup per ${today}`);
+  }
   if (quotes) onStep(`Validasi kutipan baru: ${verified} dari ${quotes} cocok kata per kata dengan teks halaman`);
 
   const { results, expired }: { results: AgentResult[]; expired: number } = rankScholarships(p, notes, entries, today);

@@ -7,7 +7,7 @@ import { classifyAchievement, discoveryCountries, matchCatalog, rankScholarships
 import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
 import { checkQuota, validateProfile } from "../src/server.ts";
 import { extractCvHeuristic, redact } from "../src/cv.ts";
-import { pickPages, toEntries } from "../src/agent.ts";
+import { missingEvidence, pickPages, toEntries } from "../src/agent.ts";
 import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
 import { coachFor, previewFor } from "../src/coach.ts";
 import { CATALOG } from "../src/catalog.ts";
@@ -22,6 +22,31 @@ test("verifyQuote accepts only sentences that are on the page", () => {
   assert.ok(verifyQuote("Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00", PAGE));
   assert.equal(verifyQuote("IPK minimal 3,50 untuk semua jenjang", PAGE), "");
   assert.equal(verifyQuote("IPK", PAGE), "");
+});
+
+test("evidence checks read quotes with markdown emphasis like plain text", () => {
+  const page = `# Beasiswa Contoh Jepang
+Program ini membiayai studi di jenjang _master_ untuk mahasiswa Indonesia.
+Studi berlangsung *di Jepang* selama dua tahun.
+Pendaftaran dibuka 1 November 2026.
+Batas pendaftaran 31 Januari 2027.`;
+  const [entry] = toEntries({ page_type: "program", scholarships: [{
+    name: "Beasiswa Contoh Jepang", levels: ["S2"], countries: ["jepang"], funding: "Penuh", application_status: "open",
+    level_quote: "Program ini membiayai studi di jenjang _master_ untuk mahasiswa Indonesia.",
+    location_quote: "Studi berlangsung *di Jepang* selama dua tahun.",
+    opens_at: "2026-11-01", opens_at_quote: "Pendaftaran dibuka 1 November 2026.",
+    deadline: "2027-01-31", deadline_quote: "Batas pendaftaran 31 Januari 2027.",
+  }] }, page, "https://www.example.ac.jp/beasiswa");
+  assert.equal(missingEvidence(entry, "program", "S2", ["jepang"]), "");
+  assert.equal(missingEvidence({ ...entry, evidence: { ...entry.evidence, deadline: "" } }, "program", "S2", ["jepang"]), "tanggal tutup tidak terkutip lengkap");
+});
+
+test("verifyQuote ignores quote marks and ellipses the extractor puts around a quote", () => {
+  const sentence = "Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00";
+  assert.equal(verifyQuote(`"${sentence}"`, PAGE), sentence);
+  assert.equal(verifyQuote(`“${sentence}”`, PAGE), sentence);
+  assert.equal(verifyQuote(`... ${sentence} …`, PAGE), sentence);
+  assert.equal(verifyQuote(`"Pendaftar jenjang Magister ... sekurang-kurangnya 3,00"`, PAGE), "");
 });
 
 test("toEntries keeps verified quotes, splits list pages, rejects non-scholarship pages", () => {
@@ -158,7 +183,8 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
     cache.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  const output = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
+  const steps: string[] = [];
+  const output = await runSearch(targetProfile, notes, (step) => steps.push(step), "2026-11-26", cache);
   assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
   assert.equal(output.results.length, 1);
   assert.deepEqual(output.results[0].program.levels, ["S1", "S2"]);
@@ -175,8 +201,13 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2"]);
   assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
   assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
-  const empty = await runSearch(targetProfile, notes, () => {}, "2026-11-27", cache);
+  const emptySteps: string[] = [];
+  const empty = await runSearch(targetProfile, notes, (step) => emptySteps.push(step), "2026-11-27", cache);
   assert.deepEqual(empty.results, []);
+  const pageStep = steps.find((step) => step.startsWith("Membaca lpdp.kemenkeu.go.id"));
+  assert.match(pageStep ?? "", /8 lainnya kurang bukti: 2 lokasi studi tidak terbukti, .*1 tanpa bukti beasiswa atau bantuan biaya$/);
+  assert.ok(steps.includes("3 kandidat berbukti dilewati karena pendaftarannya belum buka atau sudah tutup per 2026-11-26"));
+  assert.ok(emptySteps.includes("4 kandidat berbukti dilewati karena pendaftarannya belum buka atau sudah tutup per 2026-11-27"));
   assert.equal(empty.usage?.firecrawl_pages, 0);
   assert.equal(empty.usage?.firecrawl_searches, 5);
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
