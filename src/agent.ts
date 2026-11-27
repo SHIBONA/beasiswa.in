@@ -368,10 +368,30 @@ export async function readTargetPage(url: string, target: string, destinations: 
   const prompt = `${FC_PROMPT} Cari beasiswa jenjang ${target} (S1 sarjana, S2 magister, S3 doktor, Exchange pertukaran) untuk negara studi ${destinations.join(", ") || "mana saja"}. Tanggal saat ini ${today}. Ambil periode pendaftaran terbaru, termasuk yang akan dibuka atau yang baru ditutup, asalkan tanggalnya tertulis. Untuk setiap hasil, kutip lokasi kampus dan tanggal mulai serta tanggal tutup pendaftaran beasiswa untuk jalur dan periode yang sama. Pilih kutipan yang memuat hari, bulan dan tahun. Jika tanggal mulai tidak disebut, kutip pernyataan bahwa pendaftaran sedang dibuka untuk periode tersebut. Jangan gunakan jadwal pengumuman, pendaftaran reguler kampus atau periode yang lebih lama dari periode terbaru. Untuk program di Jepang, kutip bahwa studi berlangsung di Jepang.`;
   const { json, markdown, finalUrl } = await scrapeJson(url, FC_SCHEMA, prompt);
   const checkedAt = new Date().toISOString();
-  const reviewed = toEntries(json, markdown, finalUrl).map((entry) => ({ entry, reason: missingEvidence(entry, record(json).page_type, target, destinations) }));
+  const pageType = record(json).page_type;
+  const reviewed = toEntries(json, markdown, finalUrl)
+    .map((entry) => withHeadingDegree(entry, markdown, pageType, target))
+    .map((entry) => ({ entry, reason: missingEvidence(entry, pageType, target, destinations) }));
   const entries = reviewed.filter(({ reason }) => !reason).map(({ entry }) => ({ ...entry, source_checked_at: checkedAt }));
   const rejected = reviewed.flatMap(({ entry, reason }) => (reason ? [{ name: entry.name, reason }] : []));
   return { entries, rejected, checkedAt, finalUrl, quotes: askedQuotes(json) };
+}
+
+// The extractor sometimes quotes a sentence without the degree although the page title names it, as in
+// "# Beasiswa MEXT Program Research Students (S2/S3) 2027". A heading of this program that names the
+// degree is verbatim page text, so it can stand in as the degree quote.
+export function withHeadingDegree(entry: WebScholarship, markdown: string, pageType: unknown, target: string): WebScholarship {
+  if (opensLevel(entry.levels, target) && mentionsStudyLevel(entry.evidence.jenjang, target)) return entry;
+  const name = plain(entry.name).trim().toLowerCase();
+  const headings = markdown.split("\n").filter((line) => /^#{1,3}\s/.test(line)).map((line) => line.replace(/^#+\s*/, "").trim());
+  const ofProgram = (heading: string, i: number) => {
+    const text = plain(heading).trim().toLowerCase();
+    return text.includes(name) || (text.length >= 12 && name.includes(text)) || (pageType === "program" && i === 0);
+  };
+  const heading = headings.find((h, i) => ofProgram(h, i) && mentionsStudyLevel(h, target));
+  if (!heading) return entry;
+  const level = target === "Exchange" ? "Exchange S1" : target;
+  return { ...entry, levels: [...new Set([...entry.levels, level])], evidence: { ...entry.evidence, jenjang: heading } };
 }
 
 // The first piece of evidence a card needs but the page does not quote, or "" when it has all of them.

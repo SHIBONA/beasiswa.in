@@ -7,7 +7,7 @@ import { classifyAchievement, discoveryCountries, matchCatalog, rankScholarships
 import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
 import { checkQuota, validateProfile } from "../src/server.ts";
 import { extractCvHeuristic, redact } from "../src/cv.ts";
-import { missingEvidence, pickPages, toEntries } from "../src/agent.ts";
+import { missingEvidence, pickPages, toEntries, withHeadingDegree } from "../src/agent.ts";
 import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
 import { coachFor, previewFor } from "../src/coach.ts";
 import { CATALOG } from "../src/catalog.ts";
@@ -39,6 +39,23 @@ Batas pendaftaran 31 Januari 2027.`;
   }] }, page, "https://www.example.ac.jp/beasiswa");
   assert.equal(missingEvidence(entry, "program", "S2", ["jepang"]), "");
   assert.equal(missingEvidence({ ...entry, evidence: { ...entry.evidence, deadline: "" } }, "program", "S2", ["jepang"]), "tanggal tutup tidak terkutip lengkap");
+});
+
+test("a heading that names the program and degree stands in for a quote without the degree", () => {
+  const page = `# Beasiswa MEXT Program Research Students (S2/S3) 2027
+Research Student Enrollment Spring : 2 tahun (April 2027 – Maret 2029)
+## Persyaratan
+Mahasiswa peneliti belajar di universitas pascasarjana di Jepang.`;
+  const [entry] = toEntries({ page_type: "program", scholarships: [{
+    name: "Beasiswa MEXT Program Research Students (S2/S3) 2027", levels: [], countries: ["jepang"],
+    level_quote: "Research Student Enrollment Spring : 2 tahun (April 2027 – Maret 2029)",
+  }] }, page, "https://www.id.emb-japan.go.jp/itpr_id/sch_rs.html");
+  const fixed = withHeadingDegree(entry, page, "program", "S2");
+  assert.equal(fixed.evidence.jenjang, "Beasiswa MEXT Program Research Students (S2/S3) 2027");
+  assert.deepEqual(fixed.levels, ["S2"]);
+  assert.equal(withHeadingDegree(entry, page, "program", "S1"), entry, "no heading names S1");
+  const other = toEntries({ page_type: "daftar", scholarships: [{ name: "Beasiswa Lain", levels: ["S2"], level_quote: "Persyaratan" }] }, page, "https://example.com/x")[0];
+  assert.equal(withHeadingDegree(other, page, "daftar", "S2").evidence.jenjang, "", "a list page heading of another program is not evidence");
 });
 
 test("verifyQuote ignores quote marks and ellipses the extractor puts around a quote", () => {
