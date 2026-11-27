@@ -61,10 +61,11 @@ test("discovery sends only recognised scholarship categories to providers", () =
   assert.deepEqual(discoveryPreferences(privateDetails, notes), {
     level: "S2", countries: ["hong kong", "jepang"], fields: ["teknik", "elektro", "iot"], fullFunding: true,
   });
-  const queries = firecrawlQueries(privateDetails, notes, "2027");
+  const queries = firecrawlQueries(privateDetails, notes, "2027-08-01");
   assert.equal(queries.length, 5);
   assert.match(queries[0], /hong kong/);
-  assert.match(queries[1], /jepang/);
+  assert.ok(queries.every((query) => query.includes("hong kong")));
+  assert.match(firecrawlQueries({ ...privateDetails, negara_tujuan: "" }, notes, "2027-08-01")[1], /Japan/);
   assert.doesNotMatch(queries.join(" "), /NAMA_FIKTIF|rahasia|privat|pribadi|081234567890|3\.57|8\.5/i);
 });
 
@@ -94,7 +95,7 @@ test("malformed provider items are skipped or reduced to bounded facts", () => {
   assert.equal(result.funding, "Tidak tertulis");
 });
 
-test("Firecrawl keeps source quotes and reuses fresh extraction across searches", async (t) => {
+test("Firecrawl only returns evidenced, open scholarships for the target degree and country", async (t) => {
   const providerKey = process.env.FIRECRAWL_API_KEY;
   process.env.FIRECRAWL_API_KEY = "test-fixture-never-used";
   t.after(() => {
@@ -115,23 +116,40 @@ test("Firecrawl keeps source quotes and reuses fresh extraction across searches"
     }
     assert.equal(body.url, programUrl);
     const degreeQuote = "Program LPDP membiayai studi sarjana dan magister.";
+    const undergraduate = "Beasiswa Sarjana membiayai studi undergraduate di Jepang.";
     const prerequisite = "Beasiswa Doktor untuk lulusan S2.";
     const admission = "Pendaftaran Magister Teknik Elektro telah dibuka.";
-    return Response.json({ success: true, data: { markdown: [PAGE, degreeQuote, prerequisite, admission].join("\n"), metadata: { url: programUrl }, json: {
+    const location = "Perkuliahan Program LPDP berlangsung di universitas di Jepang.";
+    const window = "Pendaftaran Program LPDP berlangsung dari 2 November 2026 hingga 26 November 2026.";
+    const base = {
+      levels: ["S1", "S2"], countries: ["Japan"], study_location: "Jepang", location_quote: location,
+      opens_at: "2026-11-02", opens_at_quote: window, deadline: "2026-11-26", deadline_quote: window,
+    };
+    const otherAwards = [
+      { name: "Beasiswa Indonesia", countries: ["indonesia"], study_location: "Indonesia", location_quote: "Studi Beasiswa Indonesia berlangsung di Jakarta, Indonesia." },
+      { name: "Beasiswa Lokasi Salah", location_quote: "Pendanaan oleh perusahaan Jepang untuk studi di Indonesia." },
+      { name: "Beasiswa Expired", deadline: "2026-11-25", deadline_quote: "Pendaftaran ditutup 25 November 2026." },
+      { name: "Beasiswa Upcoming", opens_at: "2026-11-29", opens_at_quote: "Pendaftaran dibuka mulai 29 November 2026.", deadline: "2026-12-02", deadline_quote: "Pendaftaran ditutup 2 Desember 2026." },
+      { name: "Beasiswa Tanpa Periode", opens_at: "", opens_at_quote: "" },
+      { name: "Beasiswa Tanggal Salah", deadline: "2027-11-26" },
+      { name: "Beasiswa Tutup Dini", application_status: "closed" },
+    ].map((award) => ({ ...base, ...award, level_quote: award.name + " membiayai studi magister." }));
+    const evidenceText = otherAwards.flatMap((award) => [award.level_quote, award.location_quote, award.opens_at_quote, award.deadline_quote]);
+    const outsideJapan = "Pendanaan oleh perusahaan Jepang untuk studi di Indonesia.";
+    return Response.json({ success: true, data: { markdown: [PAGE, degreeQuote, undergraduate, prerequisite, admission, location, window, outsideJapan, ...evidenceText].join("\n"), metadata: { url: programUrl }, json: {
       page_type: "daftar", scholarships: [
-        { name: "Program LPDP", countries: ["jepang"], levels: ["S1"] },
-        { name: "Undergraduate only", levels: ["S1"], requirements: "Mahasiswa sarjana" },
-        { name: "Jenjang belum diketahui", levels: [] },
-        { name: "Pelatihan", levels: ["S2"], level_quote: degreeQuote },
-        { name: "Beasiswa Doktor", levels: ["S2"], level_quote: prerequisite },
-        { name: "Magister Teknik Elektro", levels: ["S2"], level_quote: admission },
-        { name: "Program Tanpa Bukti", levels: ["S2"], level_quote: "Program Tanpa Bukti membiayai studi S2" },
-        { name: "Program LPDP", countries: ["jepang"], levels: ["S1", "S2"], level_quote: degreeQuote,
-        min_gpa: 3, min_gpa_quote: quote, ielts: 6.5, ielts_quote: "IELTS 7.0 wajib" }],
+        ...otherAwards,
+        { ...base, name: "Program LPDP", level_quote: degreeQuote,
+          min_gpa: 3, min_gpa_quote: quote, ielts: 6.5, ielts_quote: "IELTS 7.0 wajib" },
+        { ...base, name: "Beasiswa Sarjana", levels: ["S1"], level_quote: undergraduate },
+        { ...base, name: "Pelatihan", levels: ["S2"], level_quote: degreeQuote },
+        { ...base, name: "Beasiswa Doktor", levels: ["S2"], level_quote: prerequisite },
+        { ...base, name: "Magister Teknik Elektro", levels: ["S2"], level_quote: admission }],
     } } });
   });
 
   const notes = "Jepang, catatan-pribadi@example.com";
+  const targetProfile = { ...profile, negara_tujuan: "Japan" };
   const dir = mkdtempSync(join(tmpdir(), "beasiswa-cache-"));
   const path = join(dir, "data.sqlite");
   const legacy = join(dir, "data.json");
@@ -140,24 +158,27 @@ test("Firecrawl keeps source quotes and reuses fresh extraction across searches"
     cache.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  const output = await runSearch(profile, notes, () => {}, "2026-11-26", cache);
+  const output = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
   assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
   assert.equal(output.results.length, 1);
   assert.deepEqual(output.results[0].program.levels, ["S1", "S2"]);
   const discovery = requests.filter((r) => r.path === "/v2/search" && !r.body.query.includes("awardee"));
   assert.ok(discovery.every((r) => /S2|master/i.test(r.body.query)));
+  assert.ok(discovery.every((r) => /jepang|japan/i.test(r.body.query)));
   assert.equal(output.results[0].program.evidence.ipk, quote);
   assert.equal(output.results[0].program.evidence.bahasa, "");
   assert.ok(Number.isFinite(Date.parse(output.results[0].program.source_checked_at)));
   cache.close();
   cache = openStore(path, legacy);
-  const repeated = await runSearch(profile, notes, () => {}, "2026-11-26", cache);
+  const repeated = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
   assert.equal(repeated.usage.firecrawl_pages, 0);
   assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2"]);
   assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
   assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
-  await assert.rejects(runSearch({ ...profile, jenjang_tujuan: "S3" }, notes, () => {}, "2026-11-26", cache),
-    (error) => error.publicMessage?.includes("S3"));
+  const empty = await runSearch(targetProfile, notes, () => {}, "2026-11-27", cache);
+  assert.deepEqual(empty.results, []);
+  assert.equal(empty.usage.firecrawl_pages, 0);
+  assert.equal(empty.usage.firecrawl_searches, 5);
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
 });
 

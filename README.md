@@ -34,7 +34,7 @@ Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.exampl
 | + Upload CV | ✅ PDF → kolom profil terisi otomatis. PDF dibaca di browser dengan PDF.js dari dependensi lokal. Teks diproses di server lokal tanpa dikirim ke AI. |
 | S2 Mulai pencarian + catatan | ✅ API balas `202` + `search_id`, jalan di background |
 | S3 Status live | ✅ polling 1,2 dtk, langkah agen tampil satu per satu |
-| S4 Hasil berskor | ✅ hingga 30 program dengan alasan kecocokan dan tautan sumber. Firecrawl hanya merekomendasikan program yang mencantumkan jenjang tujuan. Program multijenjang dapat muncul jika mencakup tujuan tersebut. Deadline yang lewat diberi label. |
+| S4 Hasil berskor | ✅ hingga 30 program dengan alasan kecocokan dan tautan sumber. Firecrawl menampilkan beasiswa dengan bukti jenjang dan negara tujuan, bukti mulai pendaftaran atau status sedang buka, serta batas pendaftaran yang belum lewat. Jika belum ada yang memenuhi, hasil kosong. |
 | S5 Simpan | ✅ satu bookmark per program lintas pencarian. Sesuaikan CV tetap tersedia setelah riwayat asal dihapus. |
 | S6 Riwayat | ✅ urut terbaru + hapus riwayat (privasi) |
 | S7 Kuota | ✅ 5 pencarian berhasil/hari, 1 berjalan, maksimal 10 percobaan berbayar/hari → `429` + `Retry-After` |
