@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentMode, runSearch } from "./agent.mjs";
+import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.mjs";
 import { MAX_CV_CHARS, parseCv } from "./cv.mjs";
 import { coachFor, previewFor } from "./coach.mjs";
 import { openStore } from "./storage.mjs";
@@ -44,6 +44,8 @@ const SECURITY_HEADERS = {
 
 // Date in Asia/Jakarta, so "today" and the daily quota match the member's calendar.
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+const applicationDay = ({ target_countries }) => target_countries?.length === 1 && target_countries[0] === "jepang"
+  ? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : today();
 
 let store;
 let activeSearch;
@@ -94,7 +96,7 @@ async function startSearch(search, profile) {
   try {
     const { results, expired, usage, others = [] } = await runSearch(profile, search.notes, (text) => {
       search.steps.push({ at: new Date().toISOString(), text });
-    }, search.day, store);
+    }, applicationDay(search), store);
     const ranked = results.map((r, i) => ({ ...r, id: `${search.id}:${i}` }));
     store.transaction(() => store.saveSearch({
       ...search, status: "succeeded", results: ranked, expired, usage, others, duration_ms: Date.now() - started,
@@ -181,7 +183,8 @@ async function api(req, res, path) {
       if (typeof notes !== "string" || notes.length > 300) return send(res, 422, { error: "Catatan maksimal 300 karakter." });
       const day = today();
       const mode = agentMode();
-      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      if (mode === "firecrawl") search.target_countries = firecrawlDestinations(profile, notes);
       const blocked = store.transaction(() => {
         const quota = checkQuota(store.quotaSearches(day), day, new Date(), store.count("deleted", day));
         if (quota) return quota;
@@ -200,7 +203,13 @@ async function api(req, res, path) {
     }
     const search = activeSearch?.id === id ? activeSearch : store.search(id);
     if (!search) return send(res, 404, { error: "Pencarian tidak ditemukan." });
-    if (method === "GET") return send(res, 200, { search, saved_ids: store.savedIds(id) });
+    if (method === "GET") {
+      const day = applicationDay(search);
+      const results = search.mode === "firecrawl" && Array.isArray(search.target_countries)
+        ? search.results.filter((result) => hasOpenApplication(result.program ?? {}, day))
+        : search.results;
+      return send(res, 200, { search: { ...search, results }, saved_ids: store.savedIds(id) });
+    }
     if (method === "DELETE") {
       if (search.status === "running" || search.status === "queued") return send(res, 409, { error: "Pencarian masih berjalan." });
       const day = today();

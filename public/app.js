@@ -225,10 +225,11 @@ async function viewResult(id) {
   if (location.hash !== "#/hasil/" + id) return;
   const { search, saved_ids } = data;
   const live = search.status === "queued" || search.status === "running";
+  const countries = search.target_countries?.map((name) => name.replace(/\b\w/g, (c) => c.toUpperCase())).join(", ");
   const steps = search.steps.map((s, i) => `<li class="${live && i === search.steps.length - 1 ? "now" : ""}">${esc(s.text)}</li>`).join("");
   app.innerHTML = `
     <div class="row" style="justify-content:space-between">
-      <div><h1>Hasil Pencarian</h1><p class="sub">${fmtTime(search.created_at)}${search.notes ? " · “" + esc(search.notes) + "”" : ""}</p></div>
+      <div><h1>Hasil Pencarian</h1><p class="sub">${search.target_level ? "Tujuan " + esc(search.target_level) + (countries ? " · " + esc(countries) : "") + " · " : ""}${fmtTime(search.created_at)}${search.notes ? " · “" + esc(search.notes) + "”" : ""}</p></div>
       <span class="pill ${esc(search.status)}">${esc(STATUS[search.status])}</span>
     </div>
     <div class="card" aria-live="polite">
@@ -240,7 +241,7 @@ async function viewResult(id) {
       <div class="disclaimer">⚠️ ${DISCLAIMER}</div>
       ${METHOD_NOTE}
       ${resultsList(search, saved_ids)}
-      ${othersBlock(search.others)}` : ""}`;
+      ${search.mode === "firecrawl" ? "" : othersBlock(search.others)}` : ""}`;
   bindStars();
   clearTimeout(pollTimer);
   if (live) pollTimer = setTimeout(() => location.hash === "#/hasil/" + id && viewResult(id), POLL_MS);
@@ -248,13 +249,20 @@ async function viewResult(id) {
 
 // Eligible programs first; programs with hard limits stay visible below a divider, labelled.
 function resultsList(search, savedIds) {
+  if (search.mode === "firecrawl" && !Array.isArray(search.target_countries)) {
+    return `<div class="card">Pencarian lama ini dibuat sebelum pemeriksaan periode pendaftaran tersedia. <a href="#/cari">Mulai pencarian baru</a> untuk melihat beasiswa yang masih buka.</div>`;
+  }
+  if (!search.results.length) {
+    return `<div class="card">Belum ada beasiswa yang bisa dipastikan masih buka untuk tujuan ini dari sumber yang diperiksa.</div>`;
+  }
   const limited = (r) => (r.limits ?? []).length > 0;
   const ok = search.results.filter((r) => !limited(r));
   const rest = search.results.filter(limited);
   const card = (r) => resultCard(r, savedIds.includes(r.id));
-  return `<p class="sub"><b>${search.results.length} beasiswa</b>: ${ok.length} sesuai jenjang & deadline, ${rest.length} ditampilkan dengan batasan. Diurutkan dari skor tertinggi.</p>
+  const summary = search.mode === "firecrawl" ? "pendaftaran masih buka" : "sesuai jenjang & deadline";
+  return `<p class="sub"><b>${search.results.length} beasiswa</b> · ${search.mode === "firecrawl" ? summary : `${ok.length} ${summary}`} ${rest.length ? `· ${rest.length} dengan catatan` : ""}</p>
     ${ok.map(card).join("")}
-    ${rest.length ? `<div class="divider"><b>Tetap ditampilkan dengan batasan (${rest.length})</b><span class="hint">Jenjang berbeda, deadline periode ini lewat, atau sumber agregator. Berguna sebagai referensi dan untuk periode berikutnya.</span></div>${rest.map(card).join("")}` : ""}`;
+    ${rest.length ? `<div class="divider"><b>Tetap ditampilkan dengan batasan (${rest.length})</b><span class="hint">Periksa batasan pada setiap kartu, termasuk deadline dan sumber informasi.</span></div>${rest.map(card).join("")}` : ""}`;
 }
 
 function othersBlock(others) {
@@ -269,6 +277,7 @@ function othersBlock(others) {
 function resultCard(r, saved, fromBookmarks = false) {
   const color = r.score >= 75 ? "var(--ok)" : r.score >= 50 ? "var(--brand)" : "var(--warn)";
   const limits = r.limits ?? [];
+  const evidence = r.program?.evidence;
   const checked = r.program?.source_checked_at;
   const checkedDate = checked && Number.isFinite(Date.parse(checked))
     ? new Date(checked).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })
@@ -285,6 +294,9 @@ function resultCard(r, saved, fromBookmarks = false) {
           <span class="pill">⏰ ${esc(fmtDate(r.deadline))}</span>
         </div>
         ${checkedDate ? `<p class="hint">Sumber diperiksa ${esc(checkedDate)}</p>` : ""}
+        ${evidence?.jenjang ? `<details><summary>Bukti dari sumber</summary>
+          ${[["Jenjang", evidence.jenjang], ["Lokasi studi", evidence.lokasi], ["Pendaftaran buka", evidence.pembukaan], ["Batas pendaftaran", evidence.deadline]].filter(([, quote]) => quote).map(([label, quote]) => `<blockquote><b>${label}</b><br>${esc(quote)}</blockquote>`).join("")}
+        </details>` : ""}
         <p class="req"><b>Syarat ringkas:</b> ${esc(r.requirements)}</p>
         ${insightBlock(r)}
         ${breakdownBlock(r)}
