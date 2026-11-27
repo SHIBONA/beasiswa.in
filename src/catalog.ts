@@ -61,7 +61,8 @@ const KNOWN_COUNTRIES = [...new Set(CATALOG.flatMap((s) => s.countries))];
 
 function countriesInNotes(notes: string) {
   const text = norm(notes);
-  return [...KNOWN_COUNTRIES, ...ALIASES.keys()].filter((c) => c.length > 3 && new RegExp(`\\b${c}\\b`).test(text)).map(country);
+  // "us" is skipped because notes often use the English word, not the country.
+  return [...KNOWN_COUNTRIES, ...ALIASES.keys()].filter((c) => c !== "us" && new RegExp(`\\b${c}\\b`).test(text)).map(country);
 }
 
 // Return only catalog labels before using free-form profile fields in a provider query.

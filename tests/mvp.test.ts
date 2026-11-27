@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyAchievement, matchCatalog, rankScholarships } from "../src/catalog.ts";
+import { classifyAchievement, discoveryCountries, matchCatalog, rankScholarships } from "../src/catalog.ts";
 import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
 import { checkQuota, validateProfile } from "../src/server.ts";
 import { extractCvHeuristic, redact } from "../src/cv.ts";
@@ -287,6 +287,12 @@ test("live results keep only URLs the agent saw; past deadline is labelled", () 
 test("score equals the sum of its breakdown", () => {
   const { results } = matchCatalog(profile, "", "2026-11-26");
   for (const r of results) assert.equal(r.score, Math.max(0, Math.min(100, r.breakdown.reduce((s, b) => s + b.points, 0))));
+});
+
+test("short country aliases in notes count like the destination field", () => {
+  assert.deepEqual(discoveryCountries("", "beasiswa S2 UK atau USA, fully funded").sort(), ["amerika serikat", "inggris"]);
+  assert.deepEqual(discoveryCountries("", "kuliah di HK"), ["hong kong"]);
+  assert.deepEqual(discoveryCountries("", "please help us find one"), []);
 });
 
 test("country aliases: Hongkong matches LPDP's Hong Kong destination", () => {
