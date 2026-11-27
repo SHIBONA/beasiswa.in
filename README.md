@@ -4,18 +4,18 @@ Prototipe **Cari Beasiswa** untuk satu pengguna di komputer lokal. Aplikasi meny
 
 ## Jalankan
 
-Gunakan Node.js 24.8+ pada lini 24 LTS (atau 22.22.3+ pada lini 22).
+Gunakan [Bun](https://bun.sh) 1.4+.
 
 ```bash
-npm ci
-npm start                # mode DEMO jika tidak ada API key
+bun install --frozen-lockfile
+bun start                # mode DEMO jika tidak ada API key
 # buka http://localhost:3000 (server mendengarkan di 127.0.0.1)
 ```
 
 Mode LIVE (agen Claude sungguhan, cari di web):
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... node server.mjs      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; node server.mjs
+ANTHROPIC_API_KEY=sk-ant-... bun server.mjs      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; bun server.mjs
 ```
 
 Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.example .env` di PowerShell), isi `FIRECRAWL_API_KEY` dengan key akun Anda, lalu jalankan ulang aplikasi. Mode Firecrawl aktif otomatis. Aplikasi menjalankan 5 kueri, memeriksa maksimal 10 halaman, mencocokkan kutipan dengan teks sumber, menghitung skor, lalu mencari artikel awardee untuk maksimal 5 program. Data hasil ekstraksi dapat dipakai ulang jika sumber diperiksa dalam 24 jam terakhir. Kartu menampilkan tanggal pemeriksaan saat tersedia. Kueri pencarian tetap memakai Firecrawl.
@@ -66,12 +66,12 @@ Untuk mencadangkan data, hentikan server lalu salin `data.sqlite` dan berkas pen
 ## Tes
 
 ```bash
-npm test
-npx e2e-web install chromium
-npm run test:browser
-npm audit
+bun test
+bunx e2e-web install chromium
+bun run test:browser
+bun audit
 ```
 
-Suite browser membutuhkan Node.js 22.22.3+ pada lini 22, atau 24.8+. Tes browser memakai profil fiktif dan server demo dengan penyimpanan terpisah di `.e2e/`. Jalankan dengan `BEASISWA_TEST_MOBILE=1` untuk viewport 375 × 812. Tes API memakai proses server dan penyimpanan sementara sendiri.
+Tes browser memakai profil fiktif dan server demo dengan penyimpanan terpisah di `.e2e/`. Jalankan dengan `BEASISWA_TEST_MOBILE=1` untuk viewport 375 × 812. Tes API memakai proses server dan penyimpanan sementara sendiri.
 
 Workflow **Verification** menjalankan audit dependensi, tes unit dan HTTP, serta tes Chromium desktop dan seluler saat ada pull request atau push ke `main`. Pengujian di GitHub Actions memakai mode demo tanpa API key.

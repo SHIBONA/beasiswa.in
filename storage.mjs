@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { Database } from "bun:sqlite";
 import { programIdentity } from "./catalog.mjs";
 
 const VERSION = 1;
@@ -84,7 +84,7 @@ export function openStore(path, legacyPath) {
   } catch (error) {
     if (error.code !== "EEXIST") throw error;
   }
-  const db = new DatabaseSync(path);
+  const db = new Database(path, { strict: true });
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
   const get = (sql, ...args) => db.prepare(sql).get(...args);
   const all = (sql, ...args) => db.prepare(sql).all(...args);
