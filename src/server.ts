@@ -4,10 +4,10 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.mjs";
-import { MAX_CV_CHARS, parseCv } from "./cv.mjs";
-import { coachFor, previewFor } from "./coach.mjs";
-import { openStore } from "./storage.mjs";
+import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.ts";
+import { MAX_CV_CHARS, parseCv } from "./cv.ts";
+import { coachFor, previewFor } from "./coach.ts";
+import { openStore } from "./storage.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // API keys (FIRECRAWL_API_KEY / ANTHROPIC_API_KEY) live in .env, never in source.
@@ -183,7 +183,7 @@ async function api(req, res, path) {
       if (typeof notes !== "string" || notes.length > 300) return send(res, 422, { error: "Catatan maksimal 300 karakter." });
       const day = today();
       const mode = agentMode();
-      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      const search: Record<string, any> = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
       if (mode === "firecrawl") search.target_countries = firecrawlDestinations(profile, notes);
       const blocked = store.transaction(() => {
         const quota = checkQuota(store.quotaSearches(day), day, new Date(), store.count("deleted", day));
@@ -232,7 +232,7 @@ async function api(req, res, path) {
     if (method === "POST" && action === "preview") {
       const body = await readJson(req);
       const patch = {};
-      for (const [key, max] of [["prestasi", 500], ["bidang_minat", 200], ["negara_tujuan", 200]]) {
+      for (const [key, max] of [["prestasi", 500], ["bidang_minat", 200], ["negara_tujuan", 200]] as const) {
         if (body[key] === undefined) continue;
         if (typeof body[key] !== "string" || body[key].length > max) return send(res, 422, { error: `${key} maksimal ${max} karakter.` });
         patch[key] = body[key];

@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyAchievement, matchCatalog, rankScholarships } from "../src/catalog.mjs";
-import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.mjs";
-import { checkQuota, validateProfile } from "../src/server.mjs";
-import { extractCvHeuristic, redact } from "../src/cv.mjs";
-import { pickPages, toEntries } from "../src/agent.mjs";
-import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.mjs";
-import { coachFor, previewFor } from "../src/coach.mjs";
-import { CATALOG } from "../src/catalog.mjs";
-import { openStore } from "../src/storage.mjs";
+import { classifyAchievement, matchCatalog, rankScholarships } from "../src/catalog.ts";
+import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
+import { checkQuota, validateProfile } from "../src/server.ts";
+import { extractCvHeuristic, redact } from "../src/cv.ts";
+import { pickPages, toEntries } from "../src/agent.ts";
+import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
+import { coachFor, previewFor } from "../src/coach.ts";
+import { CATALOG } from "../src/catalog.ts";
+import { openStore } from "../src/storage.ts";
 
 const PAGE = `# Beasiswa Reguler
 | Persyaratan | Pendaftar jenjang **Magister** wajib memiliki IPK sekurang-kurangnya 3,00 pada skala 4,00 |

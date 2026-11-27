@@ -228,7 +228,7 @@ export function rankScholarships(profile, notes, scholarships, today) {
     program: s, // raw facts, so the CV coach can re-score "what if" profiles later
   }));
   const expired = scholarships.filter((s) => isExpired(s.deadline, today)).length;
-  results.sort((a, b) => (a.limits.length > 0) - (b.limits.length > 0) || b.score - a.score);
+  results.sort((a, b) => Number(a.limits.length > 0) - Number(b.limits.length > 0) || b.score - a.score);
   return { results: results.slice(0, MAX_RESULTS), expired, eligible: results.filter((r) => !r.limits.length).length };
 }
 

@@ -15,7 +15,7 @@ const BASE = `${ORIGIN}/api`;
 const dir = mkdtempSync(join(tmpdir(), "beasiswa-e2e-"));
 let server;
 
-const call = async (path, method = "GET", body) => {
+const call = async (path: string, method = "GET", body?: unknown) => {
   const res = await fetch(BASE + path, { method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
   return { status: res.status, body: await res.json() };
 };
@@ -29,7 +29,7 @@ const waitDone = async (id) => {
 };
 
 async function startServer(env = {}) {
-  server = spawn(process.execPath, [fileURLToPath(new URL("../src/server.mjs", import.meta.url))], {
+  server = spawn(process.execPath, [fileURLToPath(new URL("../src/server.ts", import.meta.url))], {
     env: { ...process.env, PORT: String(PORT), DATA_FILE: join(dir, "data.json"), DEMO_STEP_MS: "5", FIRECRAWL_API_KEY: "", ANTHROPIC_API_KEY: "", ...env },
     stdio: "ignore",
   });

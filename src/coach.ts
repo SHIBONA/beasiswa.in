@@ -3,7 +3,7 @@
 // 2) what rewording cannot change (official numeric gates) and why,
 // 3) what to build next (courses, certifications, experience) with links.
 // Options never add facts: each carries a condition the member must confirm is true.
-import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements } from "./catalog.mjs";
+import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements } from "./catalog.ts";
 
 const MAX_OPTIONS = 3;
 const PRESTASI_WEAK = 12;

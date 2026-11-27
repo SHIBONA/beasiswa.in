@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { programIdentity } from "./catalog.mjs";
+import { programIdentity } from "./catalog.ts";
 
 const VERSION = 1;
 const SCHEMA = `
@@ -86,8 +86,9 @@ export function openStore(path, legacyPath) {
   }
   const db = new Database(path, { strict: true });
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
-  const get = (sql, ...args) => db.prepare(sql).get(...args);
-  const all = (sql, ...args) => db.prepare(sql).all(...args);
+  // Rows are untyped: each caller reads the columns its own query selects.
+  const get = (sql, ...args): any => db.prepare(sql).get(...args);
+  const all = (sql, ...args): any[] => db.prepare(sql).all(...args);
   const run = (sql, ...args) => db.prepare(sql).run(...args);
 
   function transaction(work) {

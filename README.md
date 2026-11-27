@@ -15,7 +15,7 @@ bun start                # mode DEMO jika tidak ada API key
 Mode LIVE (agen Claude sungguhan, cari di web):
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... bun src/server.mjs      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; bun src/server.mjs
+ANTHROPIC_API_KEY=sk-ant-... bun src/server.ts      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; bun src/server.ts
 ```
 
 Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.example .env` di PowerShell), isi `FIRECRAWL_API_KEY` dengan key akun Anda, lalu jalankan ulang aplikasi. Mode Firecrawl aktif otomatis. Aplikasi menjalankan 5 kueri, memeriksa maksimal 10 halaman, mencocokkan kutipan dengan teks sumber, menghitung skor, lalu mencari artikel awardee untuk maksimal 5 program. Data hasil ekstraksi dapat dipakai ulang jika sumber diperiksa dalam 24 jam terakhir. Kartu menampilkan tanggal pemeriksaan saat tersedia. Kueri pencarian tetap memakai Firecrawl.
@@ -23,7 +23,7 @@ Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.exampl
 | Mode | Sumber hasil | Biaya |
 |---|---|---|
 | FIRECRAWL (prioritas) | Halaman web, kutipan yang ditemukan dalam teks sumber, dan artikel awardee | Kredit Firecrawl |
-| DEMO (default) | 24 beasiswa contoh di `src/catalog.mjs`. **Deadline dan syarat merupakan data contoh.** | Gratis |
+| DEMO (default) | 24 beasiswa contoh di `src/catalog.ts`. **Deadline dan syarat merupakan data contoh.** | Gratis |
 | LIVE | Claude + penelusuran web. URL hasil harus cocok dengan URL yang dikembalikan alat pencarian atau pembacaan halaman. | Token dan penggunaan alat Anthropic |
 
 ## Cakupan PRD
@@ -66,6 +66,7 @@ Untuk mencadangkan data, hentikan server lalu salin `data.sqlite` dan berkas pen
 ## Tes
 
 ```bash
+bun run typecheck
 bun test
 bunx e2e-web install chromium
 bun run test:browser
