@@ -56,7 +56,7 @@ describe('Cari Beasiswa', () => {
 
     await card.getByRole('button', { name: /Simpan/ }).tap();
     await card.getByRole('button', { name: /Tersimpan/ }).waitFor();
-    await screen.getByRole('link', 'Tersimpan').tap();
+    await screen.getByRole('navigation', 'Menu utama').getByRole('link', 'Tersimpan').tap();
 
     await expect(screen.getByRole('heading', { name: 'Beasiswa Tersimpan' })).toBeVisible();
     await expect(screen.getByRole('heading', { name: 'Beasiswa LPDP Reguler' })).toBeVisible();
@@ -70,10 +70,11 @@ describe('Cari Beasiswa', () => {
     await browser.locator('#notes').fill('simulasi gagal');
     await screen.getByRole('button', { name: /Cari beasiswa/i }).tap();
     await screen.getByText('Pencarian gagal.', { exact: true }).waitFor();
-    await screen.getByRole('link', 'Riwayat').tap();
+    await screen.getByRole('navigation', 'Menu utama').getByRole('link', 'Riwayat').tap();
     const failed = browser.locator('tr').filter({ hasText: 'simulasi gagal' });
 
     await failed.getByRole('button', 'Hapus').tap();
+    await screen.getByRole('alertdialog').getByRole('button', 'Hapus').tap();
 
     await expect(failed).toHaveCount(0);
   });

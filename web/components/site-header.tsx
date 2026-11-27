@@ -2,59 +2,52 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import type { MetaResponse } from "@beasiswa/shared";
-import { api } from "@/lib/api";
+import { startTransition, useOptimistic, ViewTransition } from "react";
+import { NAV, SECTIONS } from "@/lib/nav";
 import { cn } from "@/lib/utils";
-
-const NAV = [
-  { href: "/cari", label: "Cari" },
-  { href: "/profil", label: "Profil" },
-  { href: "/riwayat", label: "Riwayat" },
-  { href: "/tersimpan", label: "Tersimpan" },
-];
-const MODES: Record<string, string> = {
-  firecrawl: "Live, lewat Firecrawl",
-  live: "Live, lewat Claude",
-  demo: "Demo, data contoh",
-};
 
 export function SiteHeader() {
   const pathname = usePathname();
   const fromBookmarks = useSearchParams().get("dari") === "tersimpan";
-  const [mode, setMode] = useState("");
-  useEffect(() => {
-    api<MetaResponse>("/meta").then((meta) => setMode(MODES[meta.mode] ?? MODES.demo), () => setMode("Server API tidak terhubung"));
-  }, []);
   // Result and coach pages belong to the tab the member came from.
   const section = pathname.startsWith("/hasil") || pathname.startsWith("/sesuaikan") ? (fromBookmarks ? "/tersimpan" : "/cari") : pathname;
+  // The clicked tab reads as current at once; the marker moves when the route actually commits.
+  const [optimistic, setOptimistic] = useOptimistic(section);
 
   return (
     <header className="border-b">
-      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-6 gap-y-2 px-4 pt-4 sm:px-6 sm:py-4">
-        <Link href="/cari" className="rounded-md text-base font-semibold tracking-tight outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-6 gap-y-2 px-4 pt-4 sm:px-6 sm:pt-0">
+        <Link
+          href="/cari"
+          transitionTypes={NAV.lateral}
+          className="inline-flex items-center rounded-md text-base font-semibold tracking-tight pointer-coarse:min-h-11 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:py-4"
+          translate="no"
+        >
           beasiswa.in
         </Link>
-        {mode && <span className="text-sm text-muted-foreground">{mode}</span>}
         {/* On phones the four destinations become equal tabs on their own row. */}
         <nav aria-label="Menu utama" className="grid w-full grid-cols-4 sm:ml-auto sm:flex sm:w-auto sm:gap-1">
-          {NAV.map(({ href, label }) => {
-            const active = section === href;
-            return (
-              <Link
-                key={href}
-                href={href}
-                data-slot="nav-link"
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex items-center justify-center border-b-2 border-transparent px-3 py-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:rounded-md sm:border-b-0 sm:py-1.5",
-                  active && "border-foreground font-medium text-foreground sm:bg-muted",
-                )}
-              >
-                {label}
-              </Link>
-            );
-          })}
+          {SECTIONS.map(({ href, label }) => (
+            <Link
+              key={href}
+              href={href}
+              transitionTypes={NAV.lateral}
+              onNavigate={() => startTransition(() => setOptimistic(href))}
+              data-slot="nav-link"
+              aria-current={optimistic === href ? "page" : undefined}
+              className={cn(
+                "relative flex items-center justify-center px-3 py-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:py-4",
+                optimistic === href && "font-medium text-foreground",
+              )}
+            >
+              {label}
+              {section === href && (
+                <ViewTransition name="tab-marker" share="tab-marker">
+                  <span aria-hidden="true" className="absolute inset-x-3 -bottom-px h-0.5 bg-foreground" />
+                </ViewTransition>
+              )}
+            </Link>
+          ))}
         </nav>
       </div>
     </header>

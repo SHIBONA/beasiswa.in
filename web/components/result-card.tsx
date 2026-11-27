@@ -8,6 +8,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { fmtDate, hostOf } from "@/lib/format";
+import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 const SOURCE_NOTES: Record<string, string> = {
@@ -76,7 +77,7 @@ export function ResultCard({ result: r, saved, busy = false, fromBookmarks = fal
 
         <div className="flex flex-wrap gap-2">
           {r.program && (
-            <Link className={buttonVariants()} href={`/sesuaikan/${encodeURIComponent(r.id)}${fromBookmarks ? "?dari=tersimpan" : ""}`}>Sesuaikan CV</Link>
+            <Link className={buttonVariants()} href={`/sesuaikan/${encodeURIComponent(r.id)}${fromBookmarks ? "?dari=tersimpan" : ""}`} transitionTypes={NAV.forward}>Sesuaikan CV</Link>
           )}
           <SourceLink href={r.url} className={cn(buttonVariants({ variant: "outline" }), "no-underline hover:text-foreground")}>
             {r.program?.official === false ? "Buka sumber" : "Buka situs resmi"}
@@ -140,7 +141,7 @@ function Breakdown({ r }: { r: ApiResult }) {
           return (
             <li key={`${b.key}-${i}`}>
               <Collapsible>
-                <CollapsibleTrigger className="grid w-full grid-cols-[6.5rem_1fr_auto] items-center gap-3 rounded-md py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50">
+                <CollapsibleTrigger className="grid w-full grid-cols-[6.5rem_1fr_auto] items-center gap-3 rounded-md py-2 text-left text-sm outline-none hover:bg-muted pointer-coarse:py-3 focus-visible:ring-3 focus-visible:ring-ring/50">
                   <span>{b.label}</span>
                   {penalty
                     ? <span className="text-destructive">Penalti</span>

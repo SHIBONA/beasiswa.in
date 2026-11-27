@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { CoachResponse, CvEdit, Link as GrowthLink, PreviewReport, Profile, ProfileResponse } from "@beasiswa/shared";
 import { Quote, SourceLink } from "@/components/source-link";
 import { LoadError, Loading } from "@/components/states";
+import { animate, PageTransition, Reveal } from "@/components/transitions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -16,6 +17,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api, errorText, sendJson } from "@/lib/api";
 import { hostOf } from "@/lib/format";
+import { NAV } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 type Loaded = { coach: CoachResponse; profile: Profile };
@@ -34,7 +36,7 @@ export function CoachView({ resultId, fromBookmarks }: { resultId: string; fromB
 
   useEffect(() => {
     Promise.all([api<CoachResponse>(`/coach/${encodeURIComponent(resultId)}`), api<ProfileResponse>("/profile")]).then(
-      ([coach, { profile }]) => (profile ? setLoaded({ coach, profile }) : setError("Isi profil beasiswa dulu")),
+      ([coach, { profile }]) => (profile ? animate(() => setLoaded({ coach, profile })) : setError("Isi profil beasiswa dulu")),
       (err) => setError(errorText(err)),
     );
   }, [resultId, reload]);
@@ -43,15 +45,19 @@ export function CoachView({ resultId, fromBookmarks }: { resultId: string; fromB
     ? { href: "/tersimpan", label: "Kembali ke tersimpan" }
     : { href: `/hasil/${encodeURIComponent(resultId.split(":")[0])}`, label: "Kembali ke hasil" };
   const backLink = (
-    <Link className="inline-flex items-center gap-1.5 text-sm underline underline-offset-4" href={back.href}>
+    <Link className="inline-flex items-center gap-1.5 text-sm underline underline-offset-4 pointer-coarse:min-h-11" href={back.href} transitionTypes={NAV.back}>
       <ArrowLeftIcon aria-hidden="true" className="size-4" />{back.label}
     </Link>
   );
 
   if (!loaded) {
-    return error
-      ? <div className="space-y-4"><LoadError title="Saran CV tidak bisa dimuat" message={error} />{backLink}</div>
-      : <Loading>Menghitung saran untuk beasiswa ini…</Loading>;
+    return (
+      <PageTransition>
+        {error
+          ? <div className="space-y-4"><LoadError title="Saran CV tidak bisa dimuat" message={error} />{backLink}</div>
+          : <Loading>Menghitung saran untuk beasiswa ini…</Loading>}
+      </PageTransition>
+    );
   }
   const { coach: c, profile } = loaded;
   const items = String(profile.prestasi ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
@@ -73,7 +79,8 @@ export function CoachView({ resultId, fromBookmarks }: { resultId: string; fromB
 
   async function runPreview() {
     try {
-      setPreview(await api<PreviewReport>(`/coach/${encodeURIComponent(resultId)}/preview`, sendJson("POST", patch())));
+      const report = await api<PreviewReport>(`/coach/${encodeURIComponent(resultId)}/preview`, sendJson("POST", patch()));
+      animate(() => setPreview(report));
       setPreviewError("");
     } catch (err) {
       setPreviewError(errorText(err));
@@ -107,91 +114,95 @@ export function CoachView({ resultId, fromBookmarks }: { resultId: string; fromB
     setChoices((prev) => ({ ...prev, [index]: { pick: "", texts: {}, ...prev[index], ...next } }));
 
   return (
-    <div className="space-y-12">
-      <div className="space-y-4">
-        {backLink}
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Sesuaikan CV untuk {c.program.name}</h1>
-        <p className="text-muted-foreground">
-          Skor sekarang <span className="font-medium text-foreground">{c.before}</span>. Jika semua saran kalimat dipakai, skor bisa menjadi{" "}
-          <span className="font-medium text-foreground">{c.best}</span>{c.best > c.before ? ` (naik ${c.best - c.before} poin)` : " (tidak berubah)"}.
-          {" "}Program ini menilai {c.program.values.join(", ") || "kriteria umum"}. <SourceLink href={c.program.url}>Buka sumber</SourceLink>
-        </p>
-      </div>
-
-      <section aria-labelledby="cv-edits" className="space-y-6">
-        <div className="space-y-1">
-          <h2 id="cv-edits" className="text-lg font-semibold">Yang bisa diperbaiki lewat CV</h2>
-          <p className="text-sm text-muted-foreground">Opsi di bawah tidak menambah fakta. Opsi hanya menyebut kategori atau tingkat yang dinilai program agar terbaca jelas. Kalimatnya boleh kamu ubah, misalnya dengan angka nyata.</p>
-        </div>
-        {c.cv_note && <Done>{c.cv_note}</Done>}
-        {c.cv_edits.map((e) => (
-          <EditBlock key={e.index} edit={e} choice={choices[e.index]} onChange={(next) => setChoice(e.index, next)} />
-        ))}
-        {c.profile_edits.map((e, k) => (
-          <Label key={k} className="items-start gap-3 rounded-lg border p-4 font-normal">
-            <Checkbox
-              className="mt-0.5"
-              checked={profileEdits.has(k)}
-              onCheckedChange={(checked) => setProfileEdits((prev) => {
-                const next = new Set(prev);
-                if (checked) next.add(k);
-                else next.delete(k);
-                return next;
-              })}
-            />
-            <span className="space-y-1">
-              <span className="block">{e.label}: <span className="font-medium">+{e.delta} poin, skor menjadi {e.after}</span></span>
-              <span className="block text-muted-foreground">{e.condition}</span>
-            </span>
-          </Label>
-        ))}
-        <div className="space-y-4 border-t pt-6">
-          <Label className="items-start gap-3 font-normal">
-            <Checkbox className="mt-0.5" checked={truth} onCheckedChange={setTruth} />
-            Saya pastikan semua kalimat yang dipilih sesuai fakta dan bisa dibuktikan.
-          </Label>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={runPreview}>Hitung ulang skor</Button>
-            <Button variant="outline" disabled={!truth} onClick={apply}>Simpan ke profil</Button>
-            <Button variant="ghost" onClick={copy}>Salin teks prestasi</Button>
+    <PageTransition>
+      <Reveal>
+        <div className="space-y-12">
+          <div className="space-y-4">
+            {backLink}
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Sesuaikan CV untuk {c.program.name}</h1>
+            <p className="text-muted-foreground">
+              Skor sekarang <span className="font-medium text-foreground">{c.before}</span>. Jika semua saran kalimat dipakai, skor bisa menjadi{" "}
+              <span className="font-medium text-foreground">{c.best}</span>{c.best > c.before ? ` (naik ${c.best - c.before} poin)` : " (tidak berubah)"}.
+              {" "}Program ini menilai {c.program.values.join(", ") || "kriteria umum"}. <SourceLink href={c.program.url}>Buka sumber</SourceLink>
+            </p>
           </div>
-          {!truth && <p className="text-sm text-muted-foreground">Centang pernyataan di atas untuk menyimpan ke profil.</p>}
+
+          <section aria-labelledby="cv-edits" className="space-y-6">
+            <div className="space-y-1">
+              <h2 id="cv-edits" className="text-lg font-semibold">Yang bisa diperbaiki lewat CV</h2>
+              <p className="text-sm text-muted-foreground">Opsi di bawah tidak menambah fakta. Opsi hanya menyebut kategori atau tingkat yang dinilai program agar terbaca jelas. Kalimatnya boleh kamu ubah, misalnya dengan angka nyata.</p>
+            </div>
+            {c.cv_note && <Done>{c.cv_note}</Done>}
+            {c.cv_edits.map((e) => (
+              <EditBlock key={e.index} edit={e} choice={choices[e.index]} onChange={(next) => setChoice(e.index, next)} />
+            ))}
+            {c.profile_edits.map((e, k) => (
+              <Label key={k} className="items-start gap-3 rounded-lg border p-4 font-normal">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={profileEdits.has(k)}
+                  onCheckedChange={(checked) => setProfileEdits((prev) => {
+                    const next = new Set(prev);
+                    if (checked) next.add(k);
+                    else next.delete(k);
+                    return next;
+                  })}
+                />
+                <span className="space-y-1">
+                  <span className="block">{e.label}: <span className="font-medium">+{e.delta} poin, skor menjadi {e.after}</span></span>
+                  <span className="block text-muted-foreground">{e.condition}</span>
+                </span>
+              </Label>
+            ))}
+            <div className="space-y-4 border-t pt-6">
+              <Label className="items-start gap-3 font-normal">
+                <Checkbox className="mt-0.5" checked={truth} onCheckedChange={setTruth} />
+                Saya pastikan semua kalimat yang dipilih sesuai fakta dan bisa dibuktikan.
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={runPreview}>Hitung ulang skor</Button>
+                <Button variant="outline" disabled={!truth} onClick={apply}>Simpan ke profil</Button>
+                <Button variant="ghost" onClick={copy}>Salin teks prestasi</Button>
+              </div>
+              {!truth && <p className="text-sm text-muted-foreground">Centang pernyataan di atas untuk menyimpan ke profil.</p>}
+            </div>
+            <div id="previewOut" aria-live="polite">
+              {preview && <Reveal key={`${preview.before}-${preview.after}`}><Compare report={preview} /></Reveal>}
+              {previewError && <Alert variant="destructive"><AlertDescription>{previewError}</AlertDescription></Alert>}
+            </div>
+          </section>
+
+          <section aria-labelledby="hard-gaps" className="space-y-6 border-t pt-10">
+            <h2 id="hard-gaps" className="text-lg font-semibold">Yang tidak bisa diatasi dengan edit CV</h2>
+            {c.hard_gaps.length ? c.hard_gaps.map((g) => (
+              <div key={g.title} className="space-y-2">
+                <h3 className="font-medium">{g.title}</h3>
+                {g.potential > 0 && <p className="text-sm">Jika terpenuhi, skor bisa naik {g.potential} poin.</p>}
+                <p className="text-sm text-muted-foreground">{g.why}</p>
+                {g.quote && <Quote quote={g.quote} cite={`Teks sumber, ${hostOf(c.program.url)}`} />}
+                {g.actions.length > 0 && <LinkList links={g.actions} />}
+              </div>
+            )) : <Done>Semua syarat angka yang tertulis sudah terpenuhi.</Done>}
+          </section>
+
+          <section aria-labelledby="growth" className="space-y-6 border-t pt-10">
+            <h2 id="growth" className="text-lg font-semibold">Rencana pengembangan</h2>
+            {c.growth.length ? c.growth.map((g) => (
+              <div key={g.area} className="space-y-2">
+                <h3 className="font-medium first-letter:uppercase">{g.area}</h3>
+                <p className="text-sm text-muted-foreground">{g.why}</p>
+                {g.quote && <Quote quote={g.quote} cite={`Teks sumber, ${hostOf(c.program.url)}`} />}
+                <LinkList links={g.links} />
+              </div>
+            )) : <Done>Profilmu sudah kuat untuk kriteria program ini. Fokus ke esai dan wawancara.</Done>}
+          </section>
+
+          <p className="border-t pt-6 text-sm text-muted-foreground">
+            Saran ini berdasar syarat dan kriteria tertulis program, beserta kutipannya bila ada, dan memakai aturan skor yang sama dengan halaman hasil. Saran ini bukan jaminan lolos, dan bobotnya belum divalidasi ahli.
+          </p>
         </div>
-        <div id="previewOut" aria-live="polite">
-          {preview && <Compare report={preview} />}
-          {previewError && <Alert variant="destructive"><AlertDescription>{previewError}</AlertDescription></Alert>}
-        </div>
-      </section>
-
-      <section aria-labelledby="hard-gaps" className="space-y-6 border-t pt-10">
-        <h2 id="hard-gaps" className="text-lg font-semibold">Yang tidak bisa diatasi dengan edit CV</h2>
-        {c.hard_gaps.length ? c.hard_gaps.map((g) => (
-          <div key={g.title} className="space-y-2">
-            <h3 className="font-medium">{g.title}</h3>
-            {g.potential > 0 && <p className="text-sm">Jika terpenuhi, skor bisa naik {g.potential} poin.</p>}
-            <p className="text-sm text-muted-foreground">{g.why}</p>
-            {g.quote && <Quote quote={g.quote} cite={`Teks sumber, ${hostOf(c.program.url)}`} />}
-            {g.actions.length > 0 && <LinkList links={g.actions} />}
-          </div>
-        )) : <Done>Semua syarat angka yang tertulis sudah terpenuhi.</Done>}
-      </section>
-
-      <section aria-labelledby="growth" className="space-y-6 border-t pt-10">
-        <h2 id="growth" className="text-lg font-semibold">Rencana pengembangan</h2>
-        {c.growth.length ? c.growth.map((g) => (
-          <div key={g.area} className="space-y-2">
-            <h3 className="font-medium first-letter:uppercase">{g.area}</h3>
-            <p className="text-sm text-muted-foreground">{g.why}</p>
-            {g.quote && <Quote quote={g.quote} cite={`Teks sumber, ${hostOf(c.program.url)}`} />}
-            <LinkList links={g.links} />
-          </div>
-        )) : <Done>Profilmu sudah kuat untuk kriteria program ini. Fokus ke esai dan wawancara.</Done>}
-      </section>
-
-      <p className="border-t pt-6 text-sm text-muted-foreground">
-        Saran ini berdasar syarat dan kriteria tertulis program, beserta kutipannya bila ada, dan memakai aturan skor yang sama dengan halaman hasil. Saran ini bukan jaminan lolos, dan bobotnya belum divalidasi ahli.
-      </p>
-    </div>
+      </Reveal>
+    </PageTransition>
   );
 }
 

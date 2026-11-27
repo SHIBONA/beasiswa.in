@@ -9,11 +9,13 @@ import { SearchStatus } from "@/components/history-table";
 import { ResultCard } from "@/components/result-card";
 import { SourceLink } from "@/components/source-link";
 import { LoadError, Loading } from "@/components/states";
+import { animate, PageTransition, Reveal } from "@/components/transitions";
 import { useBookmarks } from "@/components/use-bookmarks";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { api, errorText } from "@/lib/api";
 import { DISCLAIMER, fmtTime, hostOf } from "@/lib/format";
+import { NAV } from "@/lib/nav";
 
 const POLL_MS = 1200;
 type Search = SearchResponse["search"];
@@ -29,7 +31,8 @@ export function ResultView({ id }: { id: string }) {
       try {
         const next = await api<SearchResponse>(`/searches/${encodeURIComponent(id)}`);
         if (stopped) return;
-        setData(next);
+        // A transition, so new agent steps and the arriving results animate in (see Reveal).
+        animate(() => setData(next));
         if (next.search.status === "queued" || next.search.status === "running") timer = setTimeout(load, POLL_MS);
       } catch (err) {
         if (!stopped) setError(errorText(err));
@@ -42,49 +45,57 @@ export function ResultView({ id }: { id: string }) {
     };
   }, [id]);
 
-  if (!data) return error ? <LoadError title="Hasil pencarian tidak bisa dibuka" message={error} /> : <Loading>Memuat hasil pencarian…</Loading>;
+  if (!data) {
+    return <PageTransition>{error ? <LoadError title="Hasil pencarian tidak bisa dibuka" message={error} /> : <Loading>Memuat hasil pencarian…</Loading>}</PageTransition>;
+  }
   const { search, saved_ids } = data;
   const live = search.status === "queued" || search.status === "running";
   const countries = search.target_countries?.map((name) => name.replace(/\b\w/g, (c) => c.toUpperCase())).join(", ");
   const target = [search.target_level && `Tujuan ${search.target_level}`, countries, fmtTime(search.created_at)].filter(Boolean).join(" · ");
 
   return (
-    <div className="space-y-10">
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Hasil Pencarian</h1>
-          <SearchStatus status={search.status} />
+    <PageTransition>
+      <Reveal>
+        <div className="space-y-10">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Hasil Pencarian</h1>
+              <SearchStatus status={search.status} />
+            </div>
+            <p className="text-muted-foreground">{target}</p>
+            {search.notes && <p className="text-sm">Catatan: {search.notes}</p>}
+          </div>
+
+          <section aria-live="polite" aria-labelledby="langkah" className="space-y-3">
+            <h2 id="langkah" className="text-sm font-medium">Langkah agen</h2>
+            <AgentTrace steps={search.steps} live={live} error={search.status === "failed" ? search.error : null} />
+            {search.status === "failed" && (
+              <Alert variant="destructive">
+                <AlertTitle>Pencarian gagal.</AlertTitle>
+                <AlertDescription>
+                  Kuota hari ini tidak terpakai. <Link className="underline underline-offset-4" href="/cari" transitionTypes={NAV.lateral}>Coba lagi</Link>
+                </AlertDescription>
+              </Alert>
+            )}
+          </section>
+
+          {search.status === "succeeded" && (
+            <Reveal>
+              <div className="space-y-10">
+                <ResultsList search={search} savedIds={saved_ids} />
+                {search.mode !== "firecrawl" && <OthersBlock others={search.others} />}
+                <Alert>
+                  <InfoIcon />
+                  <AlertTitle>Cek ulang di situs resmi</AlertTitle>
+                  <AlertDescription>{DISCLAIMER}</AlertDescription>
+                </Alert>
+                <MethodNote />
+              </div>
+            </Reveal>
+          )}
         </div>
-        <p className="text-muted-foreground">{target}</p>
-        {search.notes && <p className="text-sm">Catatan: {search.notes}</p>}
-      </div>
-
-      <section aria-live="polite" aria-labelledby="langkah" className="space-y-3">
-        <h2 id="langkah" className="text-sm font-medium">Langkah agen</h2>
-        <AgentTrace steps={search.steps} live={live} error={search.status === "failed" ? search.error : null} />
-        {search.status === "failed" && (
-          <Alert variant="destructive">
-            <AlertTitle>Pencarian gagal.</AlertTitle>
-            <AlertDescription>
-              Kuota hari ini tidak terpakai. <Link className="underline underline-offset-4" href="/cari">Coba lagi</Link>
-            </AlertDescription>
-          </Alert>
-        )}
-      </section>
-
-      {search.status === "succeeded" && (
-        <>
-          <ResultsList search={search} savedIds={saved_ids} />
-          {search.mode !== "firecrawl" && <OthersBlock others={search.others} />}
-          <Alert>
-            <InfoIcon />
-            <AlertTitle>Cek ulang di situs resmi</AlertTitle>
-            <AlertDescription>{DISCLAIMER}</AlertDescription>
-          </Alert>
-          <MethodNote />
-        </>
-      )}
-    </div>
+      </Reveal>
+    </PageTransition>
   );
 }
 
@@ -96,7 +107,7 @@ function ResultsList({ search, savedIds }: { search: Search; savedIds: string[] 
     return (
       <p>
         Pencarian ini dibuat oleh versi lama yang belum memeriksa jadwal pendaftaran.{" "}
-        <Link className="underline underline-offset-4" href="/cari">Mulai pencarian baru</Link> untuk melihat jadwal tiap beasiswa.
+        <Link className="underline underline-offset-4" href="/cari" transitionTypes={NAV.lateral}>Mulai pencarian baru</Link> untuk melihat jadwal tiap beasiswa.
       </p>
     );
   }
@@ -136,7 +147,7 @@ function ResultsList({ search, savedIds }: { search: Search; savedIds: string[] 
 function MethodNote() {
   return (
     <Collapsible className="border-t pt-4">
-      <CollapsibleTrigger className="rounded-md text-sm font-medium underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <CollapsibleTrigger className="rounded-md text-sm font-medium underline pointer-coarse:min-h-11 underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
         Cara skor dihitung dan batasnya
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -156,7 +167,7 @@ function OthersBlock({ others }: { others?: SearchHit[] }) {
   if (!others?.length) return null;
   return (
     <Collapsible className="border-t pt-4">
-      <CollapsibleTrigger className="rounded-md text-sm font-medium underline underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <CollapsibleTrigger className="rounded-md text-sm font-medium underline pointer-coarse:min-h-11 underline-offset-4 outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
         {others.length} kandidat lain yang belum dibaca agen
       </CollapsibleTrigger>
       <CollapsibleContent>

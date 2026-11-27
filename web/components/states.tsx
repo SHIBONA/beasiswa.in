@@ -24,7 +24,7 @@ export function LoadError({ title, message }: { title: string; message: string }
 export function PageHeading({ title, children }: { title: string; children?: React.ReactNode }) {
   return (
     <div className="mb-8 space-y-2">
-      <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">{title}</h1>
       {children && <p className="text-muted-foreground">{children}</p>}
     </div>
   );

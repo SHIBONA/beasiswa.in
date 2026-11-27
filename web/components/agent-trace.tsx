@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckIcon, CircleAlertIcon } from "lucide-react";
+import { Reveal } from "@/components/transitions";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle,
@@ -14,14 +15,15 @@ export function AgentTrace({ steps, live, error }: Props) {
   const lines = (
     <Trace className="gap-2.5">
       {steps.length === 0 && <Line text="Menyiapkan agen…" running />}
-      {steps.map((s, i) => <Line key={i} text={s.text} running={live && i === steps.length - 1} />)}
+      {/* Each step rises in as the poll brings it; steps already shown stay put. */}
+      {steps.map((s, i) => <Reveal key={i}><Line text={s.text} running={live && i === steps.length - 1} /></Reveal>)}
       {error && <Line text={error} error />}
     </Trace>
   );
   if (live || error) return lines;
   return (
     <TraceCollapsible>
-      <TraceCollapsibleTrigger className="text-sm">Tampilkan {steps.length} langkah agen</TraceCollapsibleTrigger>
+      <TraceCollapsibleTrigger className="text-sm pointer-coarse:min-h-11">Tampilkan {steps.length} langkah agen</TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="pt-1">{lines}</TraceCollapsibleContent>
     </TraceCollapsible>
   );

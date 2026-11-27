@@ -141,6 +141,11 @@
   button:not(:disabled), [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+  /* No double-tap zoom delay on controls; pressed states come from the components, not the grey tap flash. */
+  a, button, input, select, textarea, label, [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
   html {
     @apply font-sans;
   }
@@ -149,5 +154,92 @@
     [data-slot="button"], [data-slot="input"], [data-slot="native-select"], [data-slot="nav-link"] {
       min-height: 2.75rem;
     }
+  }
+}
+/* ---------- View transitions (react ViewTransition; recipes from vercel-react-view-transitions) ----------
+   Only what carries meaning animates: page depth (forward/back), lateral tab switches (fade), data
+   arriving, new agent steps, removed items, and the active tab marker. Everything else stays live. */
+:root {
+  --duration-exit: 150ms;
+  --duration-enter: 210ms;
+  --duration-move: 320ms;
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide {
+  from { translate: var(--slide-offset); }
+  to { translate: 0; }
+}
+@keyframes slide-y {
+  from { transform: translateY(var(--slide-y-offset, 8px)); }
+  to { transform: translateY(0); }
+}
+
+/* Live root: unnamed content (header, footer, unchanged regions) never freezes or cross-fades. */
+::view-transition-old(root) {
+  display: none;
+}
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition {
+  pointer-events: none;
+}
+
+/* Lateral moves between tabs: no depth, so a plain fade. */
+::view-transition-old(.fade-out) {
+  animation: var(--duration-exit) ease-in both fade reverse;
+}
+::view-transition-new(.fade-in) {
+  animation: var(--duration-enter) ease-out var(--duration-exit) both fade;
+}
+
+/* Going deeper (results, CV coach) slides in from the right; coming back slides from the left. */
+::view-transition-old(.nav-forward) {
+  --slide-offset: -40px;
+  animation: var(--duration-exit) ease-in both fade reverse, var(--duration-move) ease-in-out both slide reverse;
+}
+::view-transition-new(.nav-forward) {
+  --slide-offset: 40px;
+  animation: var(--duration-enter) ease-out var(--duration-exit) both fade, var(--duration-move) ease-in-out both slide;
+}
+::view-transition-old(.nav-back) {
+  --slide-offset: 40px;
+  animation: var(--duration-exit) ease-in both fade reverse, var(--duration-move) ease-in-out both slide reverse;
+}
+::view-transition-new(.nav-back) {
+  --slide-offset: -40px;
+  animation: var(--duration-enter) ease-out var(--duration-exit) both fade, var(--duration-move) ease-in-out both slide;
+}
+
+/* Data that just loaded, or a new agent step, rises slightly into place. */
+::view-transition-new(.reveal) {
+  animation: var(--duration-enter) ease-out both fade, var(--duration-move) ease-out both slide-y;
+}
+/* A removed row or card fades out while the list closes the gap. */
+::view-transition-old(.remove) {
+  animation: var(--duration-exit) ease-in both fade reverse;
+}
+
+/* The active tab marker slides between tabs instead of cross-fading. */
+::view-transition-group(.tab-marker) {
+  animation-duration: 220ms;
+  animation-timing-function: cubic-bezier(0.5, 0, 0.2, 1);
+}
+::view-transition-old(.tab-marker),
+::view-transition-new(.tab-marker) {
+  animation: none;
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
   }
 }
