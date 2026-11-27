@@ -266,9 +266,13 @@ function othersBlock(others) {
     </li>`).join("")}</ul></details>`;
 }
 
-function resultCard(r, saved) {
+function resultCard(r, saved, fromBookmarks = false) {
   const color = r.score >= 75 ? "var(--ok)" : r.score >= 50 ? "var(--brand)" : "var(--warn)";
   const limits = r.limits ?? [];
+  const checked = r.program?.source_checked_at;
+  const checkedDate = checked && Number.isFinite(Date.parse(checked))
+    ? new Date(checked).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })
+    : "";
   return `
     <article class="card result ${limits.length ? "limited" : ""}">
       <div class="score" style="--s:${Number(r.score) || 0}; --c:${color}" aria-label="Skor kecocokan ${Number(r.score) || 0}"><span>${Number(r.score) || 0}</span></div>
@@ -280,15 +284,16 @@ function resultCard(r, saved) {
           <span class="pill">🎓 ${esc(r.level)}</span><span class="pill">💰 ${esc(r.funding)}</span>
           <span class="pill">⏰ ${esc(fmtDate(r.deadline))}</span>
         </div>
+        ${checkedDate ? `<p class="hint">Sumber diperiksa ${esc(checkedDate)}</p>` : ""}
         <p class="req"><b>Syarat ringkas:</b> ${esc(r.requirements)}</p>
         ${insightBlock(r)}
         ${breakdownBlock(r)}
         ${achievementsBlock(r)}
         ${awardeeBlock(r)}
         <div class="actions">
-          ${r.program ? `<a class="btn" href="#/sesuaikan/${encodeURIComponent(r.id)}">🛠 Sesuaikan CV</a>` : ""}
+          ${r.program ? `<a class="btn" href="#/sesuaikan/${encodeURIComponent(r.id)}${fromBookmarks ? "/tersimpan" : ""}">🛠 Sesuaikan CV</a>` : ""}
           ${sourceLink(r.url, r.program?.official === false ? "Buka sumber ↗" : "Buka sumber resmi ↗", "btn ghost")}
-          <button class="star ${saved ? "on" : ""}" data-id="${esc(r.id)}" data-saved="${saved}">${saved ? "★ Tersimpan" : "☆ Simpan"}</button>
+          <button class="star ${saved ? "on" : ""}" data-id="${esc(r.id)}" data-program="${esc(r.program_id ?? r.id)}" data-saved="${saved}">${saved ? "★ Tersimpan" : "☆ Simpan"}</button>
         </div>
       </div>
     </article>`;
@@ -370,18 +375,25 @@ function achievementsBlock(r) {
 }
 
 function bindStars() {
-  document.querySelectorAll(".star").forEach((b) => {
+  const stars = Array.from(document.querySelectorAll(".star"));
+  stars.forEach((b) => {
     b.onclick = async () => {
       const saved = b.dataset.saved === "true";
+      const related = stars.filter((star) => star.dataset.program === b.dataset.program);
+      related.forEach((star) => { star.disabled = true; });
       try {
         await api("/saved/" + encodeURIComponent(b.dataset.id), { method: saved ? "DELETE" : "PUT" });
       } catch (err) {
         toast(err.message);
         return;
+      } finally {
+        related.forEach((star) => { star.disabled = false; });
       }
-      b.dataset.saved = String(!saved);
-      b.classList.toggle("on", !saved);
-      b.textContent = !saved ? "★ Tersimpan" : "☆ Simpan";
+      for (const star of related) {
+        star.dataset.saved = String(!saved);
+        star.classList.toggle("on", !saved);
+        star.textContent = !saved ? "★ Tersimpan" : "☆ Simpan";
+      }
       toast(!saved ? "Disimpan ke daftar beasiswa" : "Dihapus dari tersimpan");
       if (location.hash === "#/tersimpan" && saved) viewSaved();
     };
@@ -415,7 +427,7 @@ function editBlock(e) {
   </div>`;
 }
 
-async function viewCoach(id) {
+async function viewCoach(id, fromBookmarks = false) {
   const rid = decodeURIComponent(id);
   let c, profile;
   try {
@@ -425,8 +437,9 @@ async function viewCoach(id) {
     return;
   }
   const items = String(profile.prestasi ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
+  const backToSaved = fromBookmarks || c.saved_only;
   app.innerHTML = `
-    <p><a href="#/hasil/${encodeURIComponent(rid.split(":")[0])}">← Kembali ke hasil</a></p>
+    <p><a href="${backToSaved ? "#/tersimpan" : `#/hasil/${encodeURIComponent(rid.split(":")[0])}`}">← Kembali ke ${backToSaved ? "tersimpan" : "hasil"}</a></p>
     <h1>Sesuaikan CV untuk ${esc(c.program.name)}</h1>
     <p class="sub">Skor sekarang <b>${c.before}</b>. Potensi jika semua saran kalimat dipakai: <b>${c.best}</b> (${c.best > c.before ? `naik ${c.best - c.before} poin` : "tidak berubah"}). Program menilai: ${esc(c.program.values.join(", ") || "-")}. ${sourceLink(c.program.url, "Buka sumber ↗")}</p>
 
@@ -488,7 +501,7 @@ async function viewCoach(id) {
     try {
       await api("/profile", { method: "PUT", body: JSON.stringify({ ...profile, ...patch() }) });
       toast("Profil diperbarui. Skor baru dipakai di pencarian berikutnya.");
-      viewCoach(id);
+      viewCoach(id, fromBookmarks);
     } catch (err) {
       toast(err.message);
     }
@@ -533,19 +546,21 @@ async function viewHistory() {
 async function viewSaved() {
   const { saved } = await api("/saved");
   app.innerHTML = `<h1>Beasiswa Tersimpan</h1><p class="sub">Beasiswa yang kamu tandai untuk dipersiapkan.</p>
-    ${saved.length ? `<div class="disclaimer">⚠️ ${DISCLAIMER}</div>` + saved.map((r) => resultCard(r, true)).join("") : `<div class="card empty">Belum ada beasiswa tersimpan.</div>`}`;
+    ${saved.length ? `<div class="disclaimer">⚠️ ${DISCLAIMER}</div>` + saved.map((r) => resultCard(r, true, true)).join("") : `<div class="card empty">Belum ada beasiswa tersimpan.</div>`}`;
   bindStars();
 }
 
 // ---------- Router ----------
 async function route() {
   clearTimeout(pollTimer);
-  const [, page, id] = location.hash.split("/");
-  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === (page === "hasil" || page === "sesuaikan" ? "cari" : page || "cari")));
+  const [, page, id, from] = location.hash.split("/");
+  const fromBookmarks = from === "tersimpan";
+  const nav = page === "hasil" || page === "sesuaikan" ? (fromBookmarks ? "tersimpan" : "cari") : page || "cari";
+  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === nav));
   try {
     if (page === "profil") await viewProfile();
     else if (page === "hasil" && id) await viewResult(id);
-    else if (page === "sesuaikan" && id) await viewCoach(id);
+    else if (page === "sesuaikan" && id) await viewCoach(id, fromBookmarks);
     else if (page === "riwayat") await viewHistory();
     else if (page === "tersimpan") await viewSaved();
     else await viewSearch();

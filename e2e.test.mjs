@@ -3,7 +3,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,6 +109,7 @@ test("API rejects malformed bodies, oversized input and undefined routes", async
   assert.equal((await call("/profile/extra")).status, 404);
   assert.equal((await call("/cv/parse/extra", "POST", { text: CV })).status, 404);
   assert.equal((await fetch(ORIGIN + "/data.json")).status, 404);
+  assert.equal((await fetch(ORIGIN + "/data.sqlite")).status, 404);
   assert.equal((await fetch(ORIGIN + "/app.js", { method: "POST" })).status, 405);
   assert.equal((await fetch(ORIGIN + "/app.js", { method: "HEAD" })).status, 200);
 });
@@ -168,17 +169,50 @@ test("member flow: CV → profile → search → results → coach → before/af
   assert.equal((await call("/searches")).body.searches.length, 1);
 });
 
-test("persisting a profile leaves legacy temporary files alone", async () => {
-  const legacy = join(dir, "data.json.tmp");
-  writeFileSync(legacy, "legacy fixture");
+test("bookmarks match across searches and can still open the CV coach after history deletion", async () => {
+  const { body: { saved: [bookmark] } } = await call("/saved");
+  const { body: { search_id } } = await call("/searches", "POST", {});
+  const repeated = await waitDone(search_id);
+  const sameProgram = repeated.results.find((result) => result.name === bookmark.name);
+  assert.notEqual(sameProgram.id, bookmark.id);
+  assert.ok(sameProgram.program_id);
+  assert.equal(sameProgram.program_id, bookmark.program_id);
+  assert.ok((await call(`/searches/${search_id}`)).body.saved_ids.includes(sameProgram.id));
+  await call(`/saved/${encodeURIComponent(sameProgram.id)}`, "PUT");
+  assert.equal((await call("/saved")).body.saved.length, 1);
+  assert.equal((await call(`/searches/${search_id}`, "DELETE")).status, 200);
+  const originalSearch = bookmark.id.split(":")[0];
+  assert.equal((await call(`/searches/${originalSearch}`, "DELETE")).status, 200);
+  assert.equal((await call(`/coach/${encodeURIComponent(bookmark.id)}`)).status, 200);
+  await call(`/saved/${encodeURIComponent(bookmark.id)}`, "DELETE");
+  assert.deepEqual((await call("/saved")).body.saved, []);
+});
+
+test("imports a legacy store once, keeps the source, and recovers an interrupted search", async () => {
+  const legacy = join(dir, "legacy.json");
   const { body: { profile } } = await call("/profile");
-  assert.equal((await call("/profile", "PUT", profile)).status, 200);
-  assert.equal(readFileSync(legacy, "utf8"), "legacy fixture");
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, "data.json"), "utf8")).profile, profile);
-  assert.equal(readdirSync(dir).some((file) => file.startsWith("data.json.tmp-")), false);
+  const { body: { today } } = await call("/meta");
+  const record = { id: "old-search", created_at: new Date().toISOString(), day: today, status: "running", notes: "", steps: [], results: [] };
+  const saved = [{ id: "old-bookmark", name: "Beasiswa Lama", provider: "Kampus", country: "Indonesia", saved_at: record.created_at }];
+  const original = JSON.stringify({ profile, searches: [record], saved });
+  writeFileSync(legacy, original);
+  await stopServer();
+  await startServer({ DATA_FILE: legacy });
+  assert.deepEqual((await call("/profile")).body.profile, profile);
+  assert.equal((await call("/searches/old-search")).body.search.status, "failed");
+  assert.equal((await call("/saved")).body.saved[0].id, "old-bookmark");
+  await call("/profile", "PUT", { ...profile, prodi: "Teknik Sipil" });
+  assert.equal(readFileSync(legacy, "utf8"), original);
+  await stopServer();
+  await startServer({ DATA_FILE: legacy });
+  assert.equal((await call("/profile")).body.profile.prodi, "Teknik Sipil");
+  await stopServer();
+  await startServer();
 });
 
 test("deleting successful history cannot restore quota, including after restart", async () => {
+  const { body: { search_id } } = await call("/searches", "POST", {});
+  assert.equal((await waitDone(search_id)).status, "succeeded");
   const { body: { searches: [previous] } } = await call("/searches");
   const used = (await call("/meta")).body.quota_left;
   assert.equal((await call(`/searches/${previous.id}`, "DELETE")).status, 200);

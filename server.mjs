@@ -1,12 +1,13 @@
-// Demo server for PRD 6.4 "Cari Beasiswa". One demo member, JSON file storage, no framework.
+// Local scholarship search server for one member.
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { open, readFile, rename, unlink } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentMode, runSearch } from "./agent.mjs";
 import { MAX_CV_CHARS, parseCv } from "./cv.mjs";
 import { coachFor, previewFor } from "./coach.mjs";
+import { openStore } from "./storage.mjs";
 
 const ROOT = fileURLToPath(new URL(".", import.meta.url));
 // API keys (FIRECRAWL_API_KEY / ANTHROPIC_API_KEY) live in .env, never in source.
@@ -15,8 +16,8 @@ try {
 } catch (error) {
   if (error.code !== "ENOENT") throw error;
 }
-// DATA_FILE lets end-to-end tests run against a throwaway store.
-const DATA_PATH = process.env.DATA_FILE || join(ROOT, "data.json");
+const LEGACY_PATH = process.env.DATA_FILE || join(ROOT, "data.json");
+const DATABASE_PATH = process.env.DATABASE_FILE || (process.env.DATA_FILE ? `${LEGACY_PATH}.sqlite` : join(ROOT, "data.sqlite"));
 const PUBLIC_DIR = join(ROOT, "public");
 const PORT = Number(process.env.PORT) || 3000;
 const DAILY_QUOTA = 5;
@@ -44,40 +45,8 @@ const SECURITY_HEADERS = {
 // Date in Asia/Jakarta, so "today" and the daily quota match the member's calendar.
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
-let db = { profile: null, searches: [], saved: [] };
-try {
-  db = JSON.parse(await readFile(DATA_PATH, "utf8"));
-} catch (error) {
-  if (error.code !== "ENOENT") throw error;
-}
-// Searches cut off by a restart can never finish (PRD 11: sweeper marks them failed).
-for (const s of db.searches) {
-  if (s.status === "queued" || s.status === "running") Object.assign(s, { status: "failed", error: "Server dimulai ulang saat pencarian berjalan." });
-}
-
-let saving = Promise.resolve();
-function persist() {
-  const snapshot = JSON.stringify(db, null, 2);
-  const pending = saving.then(async () => {
-    const tempPath = `${DATA_PATH}.tmp-${randomUUID()}`;
-    const file = await open(tempPath, "wx", 0o600);
-    try {
-      try {
-        await file.writeFile(snapshot);
-      } finally {
-        await file.close();
-      }
-      await rename(tempPath, DATA_PATH);
-    } catch (error) {
-      await unlink(tempPath).catch((cleanupError) => {
-        if (cleanupError.code !== "ENOENT") console.error("Gagal membersihkan berkas sementara.");
-      });
-      throw error;
-    }
-  });
-  saving = pending.catch(() => console.error("Gagal menyimpan data lokal."));
-  return pending;
-}
+let store;
+let activeSearch;
 
 const PROFILE_FIELDS = {
   jenjang_saat_ini: (v) => ["SMA", "D3", "S1", "S2"].includes(v),
@@ -114,31 +83,36 @@ function secondsUntilTomorrow(day, now = new Date()) {
   return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
 }
 
-const countToday = (counter, day) => counter?.day === day ? counter.count : 0;
 function quotaLeft(day) {
-  const used = db.searches.filter((s) => s.day === day && s.status !== "failed").length;
-  return Math.max(0, DAILY_QUOTA - used - countToday(db.deletedSearches, day));
+  const used = store.quotaSearches(day).filter((s) => s.day === day && s.status !== "failed").length;
+  return Math.max(0, DAILY_QUOTA - used - store.count("deleted", day));
 }
 
 async function startSearch(search, profile) {
   const started = Date.now();
-  search.status = "running";
+  activeSearch = search;
   try {
-    await persist(); // Reserve the quota on disk before making paid requests.
     const { results, expired, usage, others = [] } = await runSearch(profile, search.notes, (text) => {
       search.steps.push({ at: new Date().toISOString(), text });
-    }, search.day);
-    search.results = results.map((r, i) => ({ ...r, id: `${search.id}:${i}` }));
-    Object.assign(search, { status: "succeeded", expired, usage, others });
+    }, search.day, store);
+    const ranked = results.map((r, i) => ({ ...r, id: `${search.id}:${i}` }));
+    store.transaction(() => store.saveSearch({
+      ...search, status: "succeeded", results: ranked, expired, usage, others, duration_ms: Date.now() - started,
+    }));
   } catch (error) {
     console.error(`Pencarian ${search.id} gagal (${error.name}).`);
-    Object.assign(search, { status: "failed", error: error.publicMessage ?? "Pencarian gagal. Coba lagi beberapa saat lagi." });
+    try {
+      store.saveSearch({
+        ...search, status: "failed", duration_ms: Date.now() - started,
+        error: error.publicMessage ?? "Pencarian gagal. Coba lagi beberapa saat lagi.",
+      });
+    } catch {
+      console.error("Gagal menyimpan status pencarian.");
+    }
+  } finally {
+    activeSearch = undefined;
   }
-  search.duration_ms = Date.now() - started;
-  await persist().catch(() => {});
 }
-
-const summary = ({ id, created_at, status, notes, mode, results, error }) => ({ id, created_at, status, notes, mode, count: results.length, top: results[0]?.name ?? null, error });
 
 async function readJson(req, limit = MAX_BODY_BYTES) {
   if (req.headers["content-type"]?.split(";")[0].trim().toLowerCase() !== "application/json") {
@@ -179,12 +153,11 @@ async function api(req, res, path) {
   }
 
   if (resource === "profile" && !id) {
-    if (method === "GET") return send(res, 200, { profile: db.profile });
+    if (method === "GET") return send(res, 200, { profile: store.profile() });
     if (method === "PUT") {
       const { profile, errors } = validateProfile(await readJson(req));
       if (errors) return send(res, 422, { error: "Data profil tidak valid", fields: errors });
-      db.profile = profile;
-      await persist();
+      store.setProfile(profile);
       return send(res, 200, { profile });
     }
   }
@@ -200,51 +173,53 @@ async function api(req, res, path) {
   }
 
   if (resource === "searches" && !action) {
-    if (method === "GET" && !id) return send(res, 200, { searches: [...db.searches].reverse().map(summary) });
+    if (method === "GET" && !id) return send(res, 200, { searches: store.history() });
     if (method === "POST" && !id) {
-      if (!db.profile) return send(res, 409, { error: "Isi profil beasiswa dulu." });
+      const profile = store.profile();
+      if (!profile) return send(res, 409, { error: "Isi profil beasiswa dulu." });
       const { notes = "" } = await readJson(req);
       if (typeof notes !== "string" || notes.length > 300) return send(res, 422, { error: "Catatan maksimal 300 karakter." });
       const day = today();
-      const blocked = checkQuota(db.searches, day, new Date(), countToday(db.deletedSearches, day));
-      if (blocked) return send(res, 429, blocked, { "Retry-After": String(blocked.retry_after) });
       const mode = agentMode();
-      if (mode !== "demo") {
-        const attempts = countToday(db.providerAttempts, day);
-        if (attempts >= DAILY_PROVIDER_ATTEMPTS) {
-          const retry_after = secondsUntilTomorrow(day);
-          return send(res, 429, { error: "Batas percobaan pencarian web hari ini tercapai.", retry_after }, { "Retry-After": String(retry_after) });
+      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      const blocked = store.transaction(() => {
+        const quota = checkQuota(store.quotaSearches(day), day, new Date(), store.count("deleted", day));
+        if (quota) return quota;
+        if (mode !== "demo") {
+          if (store.count("provider", day) >= DAILY_PROVIDER_ATTEMPTS) {
+            return { error: "Batas percobaan pencarian web hari ini tercapai.", retry_after: secondsUntilTomorrow(day) };
+          }
+          store.increment("provider", day);
         }
-        db.providerAttempts = { day, count: attempts + 1 };
-      }
-      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "queued", notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
-      db.searches.push(search);
-      void startSearch(search, db.profile); // background job; client polls GET /api/searches/:id
+        store.saveSearch(search); // Reserve the search and paid attempt before contacting the provider.
+        return null;
+      });
+      if (blocked) return send(res, 429, blocked, { "Retry-After": String(blocked.retry_after) });
+      void startSearch(search, profile);
       return send(res, 202, { search_id: search.id });
     }
-    const search = db.searches.find((s) => s.id === id);
+    const search = activeSearch?.id === id ? activeSearch : store.search(id);
     if (!search) return send(res, 404, { error: "Pencarian tidak ditemukan." });
-    if (method === "GET") return send(res, 200, { search, saved_ids: db.saved.map((s) => s.id) });
+    if (method === "GET") return send(res, 200, { search, saved_ids: store.savedIds(id) });
     if (method === "DELETE") {
       if (search.status === "running" || search.status === "queued") return send(res, 409, { error: "Pencarian masih berjalan." });
       const day = today();
-      if (search.day === day && search.status === "succeeded") {
-        db.deletedSearches = { day, count: countToday(db.deletedSearches, day) + 1 };
-      }
-      db.searches = db.searches.filter((s) => s.id !== id);
-      await persist();
+      store.transaction(() => {
+        if (search.day === day && search.status === "succeeded") store.increment("deleted", day);
+        store.removeSearch(id);
+      });
       return send(res, 200, { deleted: id });
     }
   }
 
   if (resource === "coach" && id) {
     const resultId = decodeId(id);
-    const search = db.searches.find((x) => x.results.some((r) => r.id === resultId));
-    const result = search?.results.find((r) => r.id === resultId);
+    const { result, notes, savedOnly } = store.lookup(resultId);
     if (!result) return send(res, 404, { error: "Hasil tidak ditemukan." });
     if (!result.program) return send(res, 409, { error: "Hasil ini dari versi lama. Jalankan pencarian ulang untuk memakai fitur Sesuaikan CV." });
-    if (!db.profile) return send(res, 409, { error: "Isi profil beasiswa dulu." });
-    if (method === "GET" && !action) return send(res, 200, { result_id: resultId, ...coachFor(db.profile, search.notes, result.program) });
+    const profile = store.profile();
+    if (!profile) return send(res, 409, { error: "Isi profil beasiswa dulu." });
+    if (method === "GET" && !action) return send(res, 200, { result_id: resultId, saved_only: savedOnly, ...coachFor(profile, notes, result.program) });
     if (method === "POST" && action === "preview") {
       const body = await readJson(req);
       const patch = {};
@@ -253,27 +228,23 @@ async function api(req, res, path) {
         if (typeof body[key] !== "string" || body[key].length > max) return send(res, 422, { error: `${key} maksimal ${max} karakter.` });
         patch[key] = body[key];
       }
-      return send(res, 200, previewFor(db.profile, search.notes, result.program, patch));
+      return send(res, 200, previewFor(profile, notes, result.program, patch));
     }
   }
 
   if (resource === "saved" && !action) {
-    if (method === "GET" && !id) return send(res, 200, { saved: [...db.saved].reverse() });
+    if (method === "GET" && !id) return send(res, 200, { saved: store.saved() });
     if (id && method === "PUT") {
       const resultId = decodeId(id);
-      // Idempotent toggle (PRD S5): saving twice keeps one copy.
-      if (!db.saved.some((s) => s.id === resultId)) {
-        const result = db.searches.flatMap((s) => s.results).find((r) => r.id === resultId);
-        if (!result) return send(res, 404, { error: "Hasil tidak ditemukan." });
-        db.saved.push({ ...result, saved_at: new Date().toISOString() });
-        await persist();
-      }
+      const { result } = store.lookup(resultId);
+      if (!result) return send(res, 404, { error: "Hasil tidak ditemukan." });
+      store.transaction(() => store.bookmark(result, new Date().toISOString()));
       return send(res, 200, { saved: true });
     }
     if (id && method === "DELETE") {
       const resultId = decodeId(id);
-      db.saved = db.saved.filter((s) => s.id !== resultId);
-      await persist();
+      const { result } = store.lookup(resultId);
+      if (result) store.removeBookmark(result.program_id);
       return send(res, 200, { saved: false });
     }
   }
@@ -331,5 +302,9 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
 });
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
-  server.listen(PORT, "127.0.0.1", () => console.log(`Cari Beasiswa (${agentMode()}): http://localhost:${PORT}`));
+  server.listen(PORT, "127.0.0.1", () => {
+    store = openStore(DATABASE_PATH, LEGACY_PATH);
+    console.log(`Cari Beasiswa (${agentMode()}): http://localhost:${PORT}`);
+  });
+  server.on("close", () => store?.close());
 }

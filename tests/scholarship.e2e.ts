@@ -60,6 +60,8 @@ describe('Cari Beasiswa', () => {
 
     await expect(screen.getByRole('heading', { name: 'Beasiswa Tersimpan' })).toBeVisible();
     await expect(screen.getByRole('heading', { name: 'Beasiswa LPDP Reguler' })).toBeVisible();
+    await card.getByRole('link', { name: /Sesuaikan CV/ }).tap();
+    await expect(screen.getByRole('link', { name: /Kembali ke tersimpan/ })).toHaveAttribute('href', '#/tersimpan');
   });
 
   test('removes a failed search from Riwayat', async ({ app, screen, browser }) => {
