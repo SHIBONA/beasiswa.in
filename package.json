@@ -7,7 +7,7 @@
   "scripts": {
     "start": "bun src/server.ts",
     "test": "bun test",
-    "typecheck": "tsc -p .",
+    "typecheck": "tsc -p . && tsc -p public",
     "test:browser": "bun --bun e2e run"
   },
   "dependencies": {

@@ -61,7 +61,8 @@ const KNOWN_COUNTRIES = [...new Set(CATALOG.flatMap((s) => s.countries))];
 
 function countriesInNotes(notes: string) {
   const text = norm(notes);
-  return [...KNOWN_COUNTRIES, ...ALIASES.keys()].filter((c) => c.length > 3 && new RegExp(`\\b${c}\\b`).test(text)).map(country);
+  // "us" is skipped because notes often use the English word, not the country.
+  return [...KNOWN_COUNTRIES, ...ALIASES.keys()].filter((c) => c !== "us" && new RegExp(`\\b${c}\\b`).test(text)).map(country);
 }
 
 // Return only catalog labels before using free-form profile fields in a provider query.
@@ -203,10 +204,13 @@ export function scoreScholarship(profile: Profile, notes: string, s: Scholarship
   return { score, reasons, gaps, breakdown, achievements: scored, insight: buildInsight(s, breakdown, relevant, values, ev) };
 }
 
+// One selection stage of the program-specific explanation shown on each result card.
+export type Insight = { label: string; ok: boolean; text: string; quotes?: Criterion[] };
+
 export const VALUE_LABELS: Record<string, string> = { riset: "riset & karya ilmiah", kompetisi: "prestasi kompetisi", kepemimpinan: "kepemimpinan", akademik: "prestasi akademik", sosial: "kontribusi sosial" };
 
 // Program-specific explanation by selection stage: administration (hard gates) -> substance -> fit.
-function buildInsight(s: Scholarship, breakdown: BreakdownRow[], relevant: ScoredAchievement[], values: string[], ev: Partial<Evidence>) {
+function buildInsight(s: Scholarship, breakdown: BreakdownRow[], relevant: ScoredAchievement[], values: string[], ev: Partial<Evidence>): Insight[] {
   const row = (key: string) => breakdown.find((b) => b.key === key);
   const gates = [row("ipk"), row("bahasa")].filter((b) => b !== undefined).filter((b) => b.max && !/Tidak ada|Tidak mensyaratkan/.test(b.detail));
   const failed = [...gates.filter((b) => b.points === 0), ...breakdown.filter((b) => b.key === "penalti")];

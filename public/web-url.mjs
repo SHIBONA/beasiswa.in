@@ -1,6 +1,11 @@
 const NON_PUBLIC_SUFFIX = /\.(?:localhost|local|internal|test|invalid|onion|home|lan|arpa)$/;
 
 // Check the hostname's syntax. DNS resolution and redirects are handled by the caller's client.
+/**
+ * @param {unknown} input
+ * @param {{ keepFragment?: boolean }} [options]
+ * @returns {URL | null}
+ */
 export function publicWebUrl(input, { keepFragment = false } = {}) {
   if (typeof input !== "string" || input.length > 2048) return null;
   try {

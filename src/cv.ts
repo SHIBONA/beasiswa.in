@@ -52,5 +52,5 @@ export function extractCvHeuristic(text: string, today: string) {
 
 export function parseCv(text: string, today: string) {
   const clean = redact(text).slice(0, MAX_CV_CHARS);
-  return { fields: extractCvHeuristic(clean, today), source: "heuristik" };
+  return { fields: extractCvHeuristic(clean, today) };
 }
