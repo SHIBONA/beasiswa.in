@@ -8,7 +8,7 @@ import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson
 import { checkQuota, validateProfile } from "../src/server.ts";
 import { extractCvHeuristic, redact } from "../src/cv.ts";
 import { missingEvidence, pickPages, toEntries, withHeadingDegree } from "../src/agent.ts";
-import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
+import { isBlocked, isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
 import { coachFor, previewFor } from "../src/coach.ts";
 import { CATALOG } from "../src/catalog.ts";
 import { openStore } from "../src/storage.ts";
@@ -94,6 +94,11 @@ test("pickPages drops duplicates and social media, official sites first", () => 
   assert.equal(duplicates, 1);
   assert.equal(blocked, 1);
   assert.deepEqual(pages.map((p) => p.url), ["https://lpdp.kemenkeu.go.id/a/", "https://www.chevening.org/scholarships", "https://blog.example.com/beasiswa"]);
+});
+
+test("social media hosts are blocked, including Threads on its current domain", () => {
+  for (const url of ["https://www.threads.com/@akun/post/abc", "https://threads.net/@akun", "https://m.facebook.com/x"]) assert.equal(isBlocked(url), true, url);
+  assert.equal(isBlocked("https://www.studyinjapan.go.jp/en/"), false);
 });
 
 test("discovery sends only recognised scholarship categories to providers", () => {

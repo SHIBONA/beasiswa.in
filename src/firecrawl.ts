@@ -12,7 +12,7 @@ const MIN_QUOTE_CHARS = 12;
 export type Raw = Record<string, unknown>;
 export const record = (value: unknown): Raw => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Raw : {};
 
-const BLOCKED_HOSTS = ["facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com", "threads.net", "youtube.com", "linkedin.com", "scribd.com", "reddit.com", "quora.com", "pinterest.com"];
+const BLOCKED_HOSTS = ["facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com", "threads.com", "threads.net", "youtube.com", "linkedin.com", "scribd.com", "reddit.com", "quora.com", "pinterest.com"];
 export const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const hostMatches = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
 const ORGANISERS = new Set([...CATALOG.map((s) => hostOf(s.url)), "daad.de", "europa.eu", "fulbrightprogram.org", "emb-japan.go.jp"]);
