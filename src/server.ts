@@ -3,7 +3,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomUUID } from "node:crypto";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.ts";
+import { agentMode, firecrawlDestinations, runSearch } from "./agent.ts";
+import { byEligibility, limitsOf } from "./catalog.ts";
 import { MAX_CV_CHARS, parseCv } from "./cv.ts";
 import { coachFor, previewFor } from "./coach.ts";
 import type { Profile } from "./catalog.ts";
@@ -202,9 +203,10 @@ async function api(req: IncomingMessage, res: ServerResponse, path: string) {
     const search = activeSearch?.id === id ? activeSearch : store.search(id);
     if (!search) return send(res, 404, { error: "Pencarian tidak ditemukan." });
     if (method === "GET") {
+      // Labels such as "deadline lewat" depend on the day, so they are recomputed on every read.
       const day = applicationDay(search);
-      const results = search.mode === "firecrawl" && Array.isArray(search.target_countries)
-        ? search.results.filter((result) => hasOpenApplication(result.program ?? {}, day))
+      const results = search.target_level
+        ? search.results.map((r) => (r.program ? { ...r, limits: limitsOf(r.program, search.target_level, day) } : r)).sort(byEligibility)
         : search.results;
       return send(res, 200, { search: { ...search, results }, saved_ids: store.savedIds(id) });
     }

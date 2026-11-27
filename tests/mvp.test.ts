@@ -120,7 +120,7 @@ test("malformed provider items are skipped or reduced to bounded facts", () => {
   assert.equal(result.funding, "Tidak tertulis");
 });
 
-test("Firecrawl only returns evidenced, open scholarships for the target degree and country", async (t) => {
+test("Firecrawl shows evidenced scholarships for the target degree and country, open ones first and the rest labelled", { timeout: 20_000 }, async (t) => {
   const providerKey = process.env.FIRECRAWL_API_KEY;
   process.env.FIRECRAWL_API_KEY = "test-fixture-never-used";
   t.after(() => {
@@ -185,8 +185,14 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   });
   const steps: string[] = [];
   const output = await runSearch(targetProfile, notes, (step) => steps.push(step), "2026-11-26", cache);
-  assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
-  assert.equal(output.results.length, 1);
+  assert.deepEqual(output.usage, { firecrawl_searches: 9, firecrawl_pages: 1 });
+  assert.equal(output.results[0].name, "Program LPDP");
+  assert.deepEqual(Object.fromEntries(output.results.map((r) => [r.name, r.limits])), {
+    "Program LPDP": [],
+    "Beasiswa Expired": ["Deadline periode ini lewat, pantau periode berikutnya"],
+    "Beasiswa Upcoming": ["Pendaftaran baru dibuka 29 November 2026"],
+    "Beasiswa Tutup Dini": ["Pendaftaran periode ini sudah ditutup, pantau periode berikutnya"],
+  });
   assert.deepEqual(output.results[0].program.levels, ["S1", "S2"]);
   const discovery = requests.filter((r) => r.path === "/v2/search" && !r.body.query.includes("awardee"));
   assert.ok(discovery.every((r) => /S2|master/i.test(r.body.query)));
@@ -198,18 +204,19 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   cache = openStore(path, legacy);
   const repeated = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
   assert.equal(repeated.usage?.firecrawl_pages, 0);
-  assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2"]);
+  assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2", "S1/S2", "S1/S2", "S1/S2"]);
   assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
   assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
-  const emptySteps: string[] = [];
-  const empty = await runSearch(targetProfile, notes, (step) => emptySteps.push(step), "2026-11-27", cache);
-  assert.deepEqual(empty.results, []);
+  const laterSteps: string[] = [];
+  const later = await runSearch(targetProfile, notes, (step) => laterSteps.push(step), "2026-11-27", cache);
+  assert.ok(later.results.every((r) => r.limits.length === 1));
+  assert.deepEqual(later.results.find((r) => r.name === "Program LPDP")?.limits, ["Deadline periode ini lewat, pantau periode berikutnya"]);
   const pageStep = steps.find((step) => step.startsWith("Membaca lpdp.kemenkeu.go.id"));
   assert.match(pageStep ?? "", /8 lainnya kurang bukti: 2 lokasi studi tidak terbukti, .*1 tanpa bukti beasiswa atau bantuan biaya$/);
-  assert.ok(steps.includes("3 kandidat berbukti dilewati karena pendaftarannya belum buka atau sudah tutup per 2026-11-26"));
-  assert.ok(emptySteps.includes("4 kandidat berbukti dilewati karena pendaftarannya belum buka atau sudah tutup per 2026-11-27"));
-  assert.equal(empty.usage?.firecrawl_pages, 0);
-  assert.equal(empty.usage?.firecrawl_searches, 5);
+  assert.ok(steps.includes("3 kandidat berbukti belum buka atau sudah tutup per 2026-11-26; tetap ditampilkan dengan label jadwal pendaftaran"));
+  assert.ok(laterSteps.includes("4 kandidat berbukti belum buka atau sudah tutup per 2026-11-27; tetap ditampilkan dengan label jadwal pendaftaran"));
+  assert.equal(later.usage?.firecrawl_pages, 0);
+  assert.equal(later.usage?.firecrawl_searches, 9);
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
 });
 

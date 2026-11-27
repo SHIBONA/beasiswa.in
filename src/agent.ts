@@ -275,9 +275,9 @@ const FC_ITEM = {
     provider: { type: "string" },
     study_location: { type: "string", description: "Lokasi studi, Bahasa Indonesia" },
     countries: { type: "array", items: { type: "string" }, description: "Negara tempat studi, Bahasa Indonesia, huruf kecil" },
-    location_quote: quoteField("Bukti negara tempat kuliah pada jalur ini, bukan asal pendaftar atau lokasi pemberi dana"),
+    location_quote: quoteField("Bukti negara tempat kuliah pada jalur ini: kalimat yang menyebut nama negaranya (misalnya \"di Jepang\" atau \"in Japan\"), bukan asal pendaftar atau lokasi pemberi dana"),
     levels: { type: "array", items: { type: "string", enum: LEVELS }, description: "Jenjang studi yang dibiayai program ini. Isi array kosong jika jenjang yang dibiayai tidak tertulis." },
-    level_quote: quoteField("Bukti bahwa beasiswa ini membiayai jenjang tujuan. Pada halaman daftar, kutipan harus mencantumkan nama program dan jenjang yang dibiayai dalam satu entri"),
+    level_quote: quoteField("Bukti bahwa beasiswa ini membiayai jenjang tujuan: kalimat atau judul yang menyebut jenjangnya secara tertulis (S1/S2/S3, sarjana, magister/master, doktor/PhD, 修士/博士). Judul halaman atau judul program boleh dipakai. Pada halaman daftar, kutipan harus mencantumkan nama program dan jenjang yang dibiayai dalam satu entri"),
     funding: { type: "string", enum: ["Penuh", "Sebagian", ""] },
     funding_quote: quoteField("Bukti bahwa program ini menawarkan beasiswa atau bantuan biaya studi, termasuk cakupan dana jika tertulis"),
     opens_at: { type: "string", description: "Tanggal mulai pendaftaran beasiswa, YYYY-MM-DD, kosong jika tidak tertulis" },
@@ -365,7 +365,7 @@ function matchesStudyDestination(entry: WebScholarship, destinations: string[]) 
 }
 
 export async function readTargetPage(url: string, target: string, destinations: string[], today: string) {
-  const prompt = `${FC_PROMPT} Cari beasiswa jenjang ${target} (S1 sarjana, S2 magister, S3 doktor, Exchange pertukaran) untuk negara studi ${destinations.join(", ") || "mana saja"}. Tanggal saat ini ${today}. Utamakan pendaftaran yang sedang berlangsung. Untuk setiap hasil, kutip lokasi kampus dan tanggal mulai serta tanggal tutup pendaftaran beasiswa untuk jalur dan periode yang sama. Pilih kutipan yang memuat hari, bulan dan tahun. Jika tanggal mulai tidak disebut, kutip pernyataan bahwa pendaftaran sedang dibuka untuk periode tersebut. Jangan gunakan jadwal pengumuman, pendaftaran reguler kampus atau periode lama. Untuk program di Jepang, kutip bahwa studi berlangsung di Jepang.`;
+  const prompt = `${FC_PROMPT} Cari beasiswa jenjang ${target} (S1 sarjana, S2 magister, S3 doktor, Exchange pertukaran) untuk negara studi ${destinations.join(", ") || "mana saja"}. Tanggal saat ini ${today}. Ambil periode pendaftaran terbaru, termasuk yang akan dibuka atau yang baru ditutup, asalkan tanggalnya tertulis. Untuk setiap hasil, kutip lokasi kampus dan tanggal mulai serta tanggal tutup pendaftaran beasiswa untuk jalur dan periode yang sama. Pilih kutipan yang memuat hari, bulan dan tahun. Jika tanggal mulai tidak disebut, kutip pernyataan bahwa pendaftaran sedang dibuka untuk periode tersebut. Jangan gunakan jadwal pengumuman, pendaftaran reguler kampus atau periode yang lebih lama dari periode terbaru. Untuk program di Jepang, kutip bahwa studi berlangsung di Jepang.`;
   const { json, markdown, finalUrl } = await scrapeJson(url, FC_SCHEMA, prompt);
   const checkedAt = new Date().toISOString();
   const reviewed = toEntries(json, markdown, finalUrl).map((entry) => ({ entry, reason: missingEvidence(entry, record(json).page_type, target, destinations) }));
@@ -514,17 +514,15 @@ async function runFirecrawl(p: Profile, notes: string, onStep: Step, today: stri
   const failures = scraped.filter(failed);
   if (failures.length) onStep(`${failures.length} halaman gagal dibaca atau ditolak.`);
   if (pages.length && failures.length === pages.length) throw failures[0].error;
-  const evidenced = dedupe(scraped.flatMap((r) => failed(r) ? [] : r));
-  const entries = evidenced.filter((entry) => hasOpenApplication(entry, today));
-  if (evidenced.length > entries.length) {
-    onStep(`${evidenced.length - entries.length} kandidat berbukti dilewati karena pendaftarannya belum buka atau sudah tutup per ${today}`);
-  }
+  const entries = dedupe(scraped.flatMap((r) => failed(r) ? [] : r));
+  const notOpen = entries.filter((entry) => !hasOpenApplication(entry, today)).length;
+  if (notOpen) onStep(`${notOpen} kandidat berbukti belum buka atau sudah tutup per ${today}; tetap ditampilkan dengan label jadwal pendaftaran`);
   if (quotes) onStep(`Validasi kutipan baru: ${verified} dari ${quotes} cocok kata per kata dengan teks halaman`);
 
   const { results, expired }: { results: AgentResult[]; expired: number } = rankScholarships(p, notes, entries, today);
   const usage = { firecrawl_searches: queries.length, firecrawl_pages: scrapeRequests };
   if (!results.length) {
-    onStep("Tidak ada beasiswa dengan bukti jenjang, lokasi, dan periode pendaftaran aktif dari halaman yang diperiksa.");
+    onStep("Tidak ada beasiswa dengan bukti jenjang, lokasi, dan periode pendaftaran dari halaman yang diperiksa.");
     return { results, expired, usage };
   }
 

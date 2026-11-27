@@ -44,7 +44,7 @@ export type AgentResult = RankedResult & { awardee_refs?: SearchHit[] };
 // Results and searches are stored as JSON documents; older versions may lack the newer fields.
 export type StoredResult = {
   id: string; name?: string; provider?: string; country?: string; deadline?: string;
-  program_id?: string; program?: Scholarship; [field: string]: unknown;
+  score?: number; limits?: string[]; program_id?: string; program?: Scholarship; [field: string]: unknown;
 };
 export type SearchStatus = "queued" | "running" | "succeeded" | "failed";
 export type Search = {

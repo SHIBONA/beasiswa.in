@@ -103,7 +103,7 @@ function ResultsList({ search, savedIds }: { search: Search; savedIds: string[] 
     return <Card><CardContent>Pencarian lama ini dibuat sebelum pemeriksaan periode pendaftaran tersedia. <Link className="text-primary underline" href="/cari">Mulai pencarian baru</Link> untuk melihat beasiswa yang masih buka.</CardContent></Card>;
   }
   if (!search.results.length) {
-    return <Card><CardContent>Belum ada beasiswa yang bisa dipastikan masih buka untuk tujuan ini dari sumber yang diperiksa.</CardContent></Card>;
+    return <Card><CardContent>Belum ada beasiswa dengan bukti jenjang, lokasi, dan jadwal pendaftaran untuk tujuan ini dari sumber yang diperiksa. Langkah agen di atas menjelaskan bukti apa yang kurang di tiap halaman.</CardContent></Card>;
   }
   const limited = (r: ApiResult) => (r.limits ?? []).length > 0;
   const ok = search.results.filter((r) => !limited(r));
@@ -115,7 +115,7 @@ function ResultsList({ search, savedIds }: { search: Search; savedIds: string[] 
   return (
     <div className="space-y-4">
       <p className="text-muted-foreground">
-        <b className="text-foreground">{search.results.length} beasiswa</b> · {search.mode === "firecrawl" ? summary : `${ok.length} ${summary}`}
+        <b className="text-foreground">{search.results.length} beasiswa</b> · {ok.length} {summary}
         {rest.length > 0 && ` · ${rest.length} dengan catatan`}
       </p>
       {ok.map(card)}
@@ -123,7 +123,7 @@ function ResultsList({ search, savedIds }: { search: Search; savedIds: string[] 
         <>
           <div className="border-t pt-3">
             <b>Tetap ditampilkan dengan batasan ({rest.length})</b>
-            <p className="text-sm text-muted-foreground">Periksa batasan pada setiap kartu, termasuk deadline dan sumber informasi.</p>
+            <p className="text-sm text-muted-foreground">Periksa batasan pada setiap kartu, termasuk jadwal pendaftaran, deadline dan sumber informasi.</p>
           </div>
           {rest.map(card)}
         </>

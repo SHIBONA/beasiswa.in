@@ -212,12 +212,19 @@ function buildInsight(s: Scholarship, breakdown: BreakdownRow[], relevant: Score
 export const MAX_RESULTS = 30;
 const LOCAL_ONLY = /local students only|for local students|permanent (citizens?|residents?)|hksar permanent|khusus warga (negara )?(lokal|setempat)/i;
 
+const longDate = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
 // Hard limits do not hide a program; they label it and push it below the eligible ones.
-export function limitsOf(s: Scholarship, profile: Profile, today: string) {
+// They depend on the day, so the server recomputes them whenever a saved search is read.
+export function limitsOf(s: Scholarship, targetLevel: string, today: string) {
   const limits: string[] = [];
   if (!s.levels.length) limits.push("Jenjang tidak tertulis");
-  else if (!opensLevel(s.levels, profile.jenjang_tujuan)) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
+  else if (!opensLevel(s.levels, targetLevel)) limits.push(`Bukan untuk ${targetLevel}`);
   if (isExpired(s.deadline, today)) limits.push("Deadline periode ini lewat, pantau periode berikutnya");
+  else if (s.application_status === "closed") limits.push("Pendaftaran periode ini sudah ditutup, pantau periode berikutnya");
+  else if (s.opens_at && s.opens_at > today) limits.push(`Pendaftaran baru dibuka ${longDate(s.opens_at)}`);
+  else if (s.application_status === "upcoming") limits.push("Pendaftaran periode ini belum dibuka");
   if (s.official === false) limits.push("Sumber belum terverifikasi sebagai penyelenggara, cek ke situs resmi");
   if (LOCAL_ONLY.test(`${s.name} ${s.requirements ?? ""}`)) limits.push("Tampaknya khusus warga lokal, cek kelayakan WNI");
   return limits;
@@ -228,15 +235,22 @@ export function programIdentity({ name, provider, country }: { name?: unknown; p
   return [name, provider, country].map((value) => String(value ?? "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " "));
 }
 
+// Eligible programs first, then limited ones; best score first within each group.
+// Also orders stored results, so it accepts documents saved by older versions.
+type Rankable = { limits?: unknown; score?: unknown };
+const isLimited = (r: Rankable) => Array.isArray(r.limits) && r.limits.length > 0;
+export const byEligibility = (a: Rankable, b: Rankable) =>
+  Number(isLimited(a)) - Number(isLimited(b)) || (Number(b.score) || 0) - (Number(a.score) || 0);
+
 export function rankScholarships(profile: Profile, notes: string, scholarships: Scholarship[], today: string) {
   const results = scholarships.map((s): RankedResult => ({
     name: s.name, provider: s.provider, country: s.country, level: s.levels.join("/") || "Tidak tertulis", funding: s.funding,
     deadline: s.deadline, requirements: s.requirements, url: s.url, source: s.source ?? "demo",
-    limits: limitsOf(s, profile, today), ...scoreScholarship(profile, notes, s),
+    limits: limitsOf(s, profile.jenjang_tujuan, today), ...scoreScholarship(profile, notes, s),
     program: s, // raw facts, so the CV coach can re-score "what if" profiles later
   }));
   const expired = scholarships.filter((s) => isExpired(s.deadline, today)).length;
-  results.sort((a, b) => Number(a.limits.length > 0) - Number(b.limits.length > 0) || b.score - a.score);
+  results.sort(byEligibility);
   return { results: results.slice(0, MAX_RESULTS), expired, eligible: results.filter((r) => !r.limits.length).length };
 }
 
