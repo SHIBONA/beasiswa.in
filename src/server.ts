@@ -102,12 +102,12 @@ async function startSearch(search: Search, profile: Profile) {
   const started = Date.now();
   activeSearch = search;
   try {
-    const { results, expired, usage, others = [] } = await runSearch(profile, search.notes, (text) => {
+    const { results, expired, usage } = await runSearch(profile, search.notes, (text) => {
       search.steps.push({ at: new Date().toISOString(), text });
     }, applicationDay(search), store);
     const ranked = results.map((r, i) => ({ ...r, id: `${search.id}:${i}` }));
     store.transaction(() => store.saveSearch({
-      ...search, status: "succeeded", results: ranked, expired, usage, others, duration_ms: Date.now() - started,
+      ...search, status: "succeeded", results: ranked, expired, usage, duration_ms: Date.now() - started,
     }));
   } catch (caught) {
     const error = caught as PublicError;
@@ -177,10 +177,10 @@ async function api(req: IncomingMessage, res: ServerResponse, path: string) {
     const { text } = await readJson(req, MAX_CV_BODY_BYTES);
     if (typeof text !== "string" || text.trim().length < 50) return send(res, 422, { error: "Teks CV tidak terbaca. Pastikan PDF berisi teks, bukan hasil scan gambar." });
     if (text.length > MAX_CV_CHARS) return send(res, 413, { error: "CV terlalu panjang." });
-    const { fields, source } = await parseCv(text, today());
+    const { fields } = parseCv(text, today());
     // Only values that pass the profile validators reach the form.
     const valid = Object.fromEntries(Object.entries(fields).filter(([k, v]) => isProfileField(k) && PROFILE_FIELDS[k](v)));
-    return send(res, 200, { fields: valid, source });
+    return send(res, 200, { fields: valid });
   }
 
   if (resource === "searches" && !action) {

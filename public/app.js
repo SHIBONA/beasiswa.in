@@ -180,7 +180,7 @@ const PDF_MODULE = "/pdf/pdf.mjs";
 async function pdfText(file) {
   /** @type {typeof import("pdfjs-dist")} */
   const pdfjs = await import(PDF_MODULE).catch(() => {
-    throw new Error("Pembaca PDF gagal dimuat. Jalankan npm ci di folder aplikasi.");
+    throw new Error("Pembaca PDF gagal dimuat. Jalankan bun install di folder aplikasi.");
   });
   pdfjs.GlobalWorkerOptions.workerSrc = "/pdf/pdf.worker.mjs";
   const task = pdfjs.getDocument({ data: await file.arrayBuffer(), useWasm: false, isOffscreenCanvasSupported: false });
@@ -228,7 +228,7 @@ async function uploadCv(file, input) {
   try {
     const text = await pdfText(file);
     show(`<ul class="steps" style="margin-top:12px"><li>Teks CV terbaca (${text.length} karakter)</li><li class="now">Mengekstrak data akademik…</li></ul>`);
-    const { fields, source } = /** @type {{ fields: Record<string, string | number>; source: string }} */ (
+    const { fields } = /** @type {{ fields: Record<string, string | number> }} */ (
       await api("/cv/parse", { method: "POST", body: JSON.stringify({ text }) }));
     if (!input.isConnected) return;
     const form = input.closest(".cv")?.nextElementSibling;
@@ -242,7 +242,7 @@ async function uploadCv(file, input) {
     }
     const names = Object.keys(fields).map((k) => FIELD_LABELS[k] ?? k);
     show(names.length
-      ? `<div class="okbox">✓ ${names.length} kolom terisi dari CV (${source === "ai" ? "dibaca AI" : "pembacaan otomatis"}): ${esc(names.join(", "))}. Kolom berwarna hijau, cek lalu klik <b>Simpan profil</b>. Negara tujuan & jenjang tujuan tetap kamu pilih sendiri.</div>`
+      ? `<div class="okbox">✓ ${names.length} kolom terisi dari CV (pembacaan otomatis): ${esc(names.join(", "))}. Kolom berwarna hijau, cek lalu klik <b>Simpan profil</b>. Negara tujuan & jenjang tujuan tetap kamu pilih sendiri.</div>`
       : `<div class="error">Tidak ada data akademik yang terbaca dari CV. Isi manual di bawah.</div>`);
   } catch (err) {
     show(`<div class="error">${esc(errorText(err))}</div>`);
