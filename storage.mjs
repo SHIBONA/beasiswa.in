@@ -176,6 +176,7 @@ export function openStore(path, legacyPath) {
     saveSearch,
     history: () => all(`SELECT s.id, json_extract(s.body, '$.created_at') AS created_at,
       s.status, json_extract(s.body, '$.notes') AS notes, json_extract(s.body, '$.mode') AS mode,
+      json_type(s.body, '$.target_countries') IS NOT NULL AS verified_search,
       json_extract(s.body, '$.error') AS error,
       (SELECT count(*) FROM results WHERE search_id = s.id) AS count,
       (SELECT json_extract(body, '$.name') FROM results WHERE search_id = s.id AND rank = 0) AS top
