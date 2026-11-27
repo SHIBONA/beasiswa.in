@@ -49,9 +49,19 @@ async function viaChat(c: EvalCase, page: Page): Promise<Extraction> {
     body: JSON.stringify(withJsonMode ? { ...body, response_format: { type: "json_object" } } : body),
     signal: AbortSignal.timeout(180_000),
   });
-  const started = Date.now();
+  let started = Date.now();
   let res = await post(provider.jsonMode);
   if (res.status === 400 && provider.jsonMode) res = await post(false); // some models refuse JSON mode
+  // Free tiers cap tokens per minute (HTTP 429): wait as long as the provider asks, up to five times.
+  for (let attempt = 1; res.status === 429 && attempt <= 5; attempt++) {
+    const text = await res.text();
+    const wait = Number(res.headers.get("retry-after")) || Number(text.match(/try again in ([\d.]+)s/)?.[1]) || 60;
+    console.log(`${c.id}: rate limited, waiting ${Math.ceil(wait)} s`);
+    await new Promise((r) => setTimeout(r, (Math.ceil(wait) + 1) * 1000));
+    started = Date.now();
+    res = await post(provider.jsonMode);
+    if (res.status === 400 && provider.jsonMode) res = await post(false);
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const reply = await res.json();
   const text = reply?.choices?.[0]?.message?.content ?? "";
@@ -70,7 +80,8 @@ function viaBaseline(c: EvalCase): Extraction {
 
 const cases = CASES.filter((c) => !only || only.includes(c.id));
 const rows = [];
-for (const c of cases) {
+for (const [i, c] of cases.entries()) {
+  console.log(`[${i + 1}/${cases.length}] ${c.id}`);
   const pageFile = here(`pages/${c.id}.json`);
   if (!existsSync(pageFile)) {
     rows.push({ id: c.id, error: "page not captured; run capture.ts" });
