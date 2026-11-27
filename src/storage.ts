@@ -1,7 +1,20 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
-import { programIdentity } from "./catalog.ts";
+import { programIdentity, type Profile, type Scholarship } from "./catalog.ts";
+
+// Results and searches are stored as JSON documents; older versions may lack the newer fields.
+export type StoredResult = {
+  id: string; name?: string; provider?: string; country?: string; deadline?: string;
+  program_id?: string; program?: Scholarship; [field: string]: unknown;
+};
+export type SearchStatus = "queued" | "running" | "succeeded" | "failed";
+export type Search = {
+  id: string; created_at: string; day: string; status: SearchStatus; target_level: string; notes: string; mode: string;
+  steps: { at: string; text: string }[]; results: StoredResult[]; expired: number; error: string | null;
+  target_countries?: string[]; usage?: Record<string, number> | null; others?: unknown[]; duration_ms?: number;
+};
+type Identified = StoredResult & { program_id: string };
 
 const VERSION = 1;
 const SCHEMA = `
@@ -53,7 +66,7 @@ const SCHEMA = `
   ) STRICT;
 `;
 
-function identify(result, mode) {
+function identify(result: StoredResult, mode: string): Identified {
   const parts = programIdentity(result.program ?? result);
   const scope = mode === "demo" ? "demo" : "web";
   const key = parts.every(Boolean) ? [scope, ...parts] : ["legacy", result.id];
@@ -61,7 +74,7 @@ function identify(result, mode) {
   return { ...result, program_id };
 }
 
-function legacyData(path) {
+function legacyData(path: string) {
   try {
     const data = JSON.parse(readFileSync(path, "utf8"));
     if (!Array.isArray(data.searches) || !Array.isArray(data.saved)) throw new Error("Struktur data.json tidak valid.");
@@ -80,11 +93,11 @@ type HistoryRow = {
 };
 
 const body = (row: BodyRow | null) => row ? JSON.parse(row.body) : null;
-const interrupted = (search) => ({
-  ...search, status: "failed", error: "Server dimulai ulang saat pencarian berjalan.",
+const interrupted = <T>(search: T) => ({
+  ...search, status: "failed" as const, error: "Server dimulai ulang saat pencarian berjalan.",
 });
 
-export function openStore(path, legacyPath) {
+export function openStore(path: string, legacyPath: string) {
   // SQLite inherits this file's permissions for its journal files on POSIX.
   try {
     writeFileSync(path, "", { flag: "wx", mode: 0o600 });
@@ -97,7 +110,7 @@ export function openStore(path, legacyPath) {
   const all = <Row>(sql: string, ...args: SQLQueryBindings[]) => db.prepare<Row, SQLQueryBindings[]>(sql).all(...args);
   const run = (sql: string, ...args: SQLQueryBindings[]) => db.prepare<unknown, SQLQueryBindings[]>(sql).run(...args);
 
-  function transaction(work) {
+  function transaction<T>(work: () => T): T {
     db.exec("BEGIN IMMEDIATE");
     try {
       const result = work();
@@ -109,7 +122,7 @@ export function openStore(path, legacyPath) {
     }
   }
 
-  function saveSearch(search) {
+  function saveSearch(search: Search) {
     const { results, ...record } = search;
     run(`INSERT INTO searches VALUES (?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET status = excluded.status, body = excluded.body`,
@@ -122,24 +135,24 @@ export function openStore(path, legacyPath) {
     });
   }
 
-  function savePeriod(result) {
+  function savePeriod(result: Identified) {
     const deadline = result.program?.deadline || result.deadline || "";
     run("INSERT INTO programs VALUES (?) ON CONFLICT DO NOTHING", result.program_id);
     run("INSERT INTO periods VALUES (?, ?) ON CONFLICT DO NOTHING", result.program_id, deadline);
     return deadline;
   }
 
-  function bookmark(result, savedAt) {
+  function bookmark(result: Identified, savedAt: string) {
     const deadline = savePeriod(result);
     run("INSERT INTO bookmarks VALUES (?, ?, ?, ?) ON CONFLICT(program_id) DO NOTHING",
       result.program_id, deadline, result.id, JSON.stringify({ ...result, saved_at: savedAt }));
   }
 
-  const setProfile = (profile) => run(`INSERT INTO profile VALUES (1, ?)
+  const setProfile = (profile: Profile) => run(`INSERT INTO profile VALUES (1, ?)
     ON CONFLICT(id) DO UPDATE SET body = excluded.body`, JSON.stringify(profile));
-  const setCount = (kind, day, count) => run(`INSERT INTO counters VALUES (?, ?, ?)
+  const setCount = (kind: string, day: string, count: number) => run(`INSERT INTO counters VALUES (?, ?, ?)
     ON CONFLICT(kind) DO UPDATE SET day = excluded.day, count = excluded.count`, kind, day, count);
-  const count = (kind, day) => get<{ count: number }>("SELECT count FROM counters WHERE kind = ? AND day = ?", kind, day)?.count ?? 0;
+  const count = (kind: string, day: string) => get<{ count: number }>("SELECT count FROM counters WHERE kind = ? AND day = ?", kind, day)?.count ?? 0;
 
   try {
     transaction(() => {
@@ -177,8 +190,8 @@ export function openStore(path, legacyPath) {
     profile: () => body(get<BodyRow>("SELECT body FROM profile WHERE id = 1")),
     setProfile,
     count,
-    increment: (kind, day) => setCount(kind, day, count(kind, day) + 1),
-    quotaSearches: (day) => all<{ day: string; status: string }>(`SELECT day, status FROM searches WHERE day = ?
+    increment: (kind: string, day: string) => setCount(kind, day, count(kind, day) + 1),
+    quotaSearches: (day: string) => all<{ day: string; status: string }>(`SELECT day, status FROM searches WHERE day = ?
       UNION ALL SELECT day, status FROM searches WHERE day <> ? AND status IN ('queued', 'running')`, day, day),
     saveSearch,
     history: () => all<HistoryRow>(`SELECT s.id, json_extract(s.body, '$.created_at') AS created_at,
@@ -187,24 +200,24 @@ export function openStore(path, legacyPath) {
       (SELECT count(*) FROM results WHERE search_id = s.id) AS count,
       (SELECT json_extract(body, '$.name') FROM results WHERE search_id = s.id AND rank = 0) AS top
       FROM searches s ORDER BY s.rowid DESC`),
-    search: (id) => {
+    search: (id: string): Search | null => {
       const search = body(get<BodyRow>("SELECT body FROM searches WHERE id = ?", id));
       return search && { ...search, results: all<BodyRow>("SELECT body FROM results WHERE search_id = ? ORDER BY rank", id).map(body) };
     },
-    removeSearch: (id) => run("DELETE FROM searches WHERE id = ?", id),
+    removeSearch: (id: string) => run("DELETE FROM searches WHERE id = ?", id),
     saved: () => all<BodyRow>("SELECT body FROM bookmarks ORDER BY rowid DESC").map(body),
-    savedIds: (searchId) => all<{ id: string }>(`SELECT r.id FROM results r JOIN bookmarks b USING (program_id)
+    savedIds: (searchId: string) => all<{ id: string }>(`SELECT r.id FROM results r JOIN bookmarks b USING (program_id)
       WHERE r.search_id = ? ORDER BY r.rank`, searchId).map((row) => row.id),
-    lookup: (id) => {
+    lookup: (id: string) => {
       const row = get<BodyRow & { notes: string | null }>(`SELECT r.body, json_extract(s.body, '$.notes') AS notes FROM results r
         JOIN searches s ON s.id = r.search_id WHERE r.id = ?`, id);
       if (row) return { result: body(row), notes: row.notes ?? "", savedOnly: false };
       return { result: body(get<BodyRow>("SELECT body FROM bookmarks WHERE result_id = ?", id)), notes: "", savedOnly: true };
     },
     bookmark,
-    removeBookmark: (id) => run("DELETE FROM bookmarks WHERE program_id = ?", id),
-    readSource: (url, cutoff) => body(get<BodyRow>("SELECT body FROM source_cache WHERE url = ? AND checked_at >= ?", url, cutoff)),
-    writeSource: (url, checkedAt, entries, cutoff) => transaction(() => {
+    removeBookmark: (id: string) => run("DELETE FROM bookmarks WHERE program_id = ?", id),
+    readSource: (url: string, cutoff: string) => body(get<BodyRow>("SELECT body FROM source_cache WHERE url = ? AND checked_at >= ?", url, cutoff)),
+    writeSource: (url: string, checkedAt: string, entries: unknown[], cutoff: string) => transaction(() => {
       run("DELETE FROM source_cache WHERE checked_at < ?", cutoff);
       run(`INSERT INTO source_cache VALUES (?, ?, ?) ON CONFLICT(url) DO UPDATE
         SET checked_at = excluded.checked_at, body = excluded.body`, url, checkedAt, JSON.stringify(entries));

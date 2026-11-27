@@ -1,25 +1,30 @@
 // End-to-end: real server process (demo mode, throwaway data file), full member flow over HTTP.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { AgentResult } from "../src/agent.ts";
+import type { Search } from "../src/storage.ts";
 
 const PORT = 3990 + Math.floor(Math.random() * 9);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const BASE = `${ORIGIN}/api`;
 const dir = mkdtempSync(join(tmpdir(), "beasiswa-e2e-"));
-let server;
+let server: ChildProcess | undefined;
 
 const call = async (path: string, method = "GET", body?: unknown) => {
   const res = await fetch(BASE + path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: res.status, body: await res.json() };
 };
-const waitDone = async (id) => {
+type ApiResult = AgentResult & { id: string; program_id: string };
+type ApiSearch = Omit<Search, "results"> & { results: ApiResult[] };
+
+const waitDone = async (id: string): Promise<ApiSearch> => {
   for (let i = 0; i < 100; i++) {
     const { body } = await call(`/searches/${id}`);
     if (["succeeded", "failed"].includes(body.search.status)) return body.search;
@@ -138,10 +143,11 @@ test("member flow: CV → profile → search → results → coach → before/af
   assert.ok(search.steps.length >= 15, "detailed agent steps");
 
   const target = search.results.find((r) => r.name.includes("LPDP"));
+  assert.ok(target);
   const coach = await call(`/coach/${encodeURIComponent(target.id)}`);
   assert.equal(coach.status, 200);
   assert.equal(coach.body.before, target.score);
-  assert.ok(coach.body.hard_gaps.some((g) => g.title.startsWith("Skor bahasa")), "IELTS 6.0 < 6.5 is a hard gap");
+  assert.ok(coach.body.hard_gaps.some((g: { title: string }) => g.title.startsWith("Skor bahasa")), "IELTS 6.0 < 6.5 is a hard gap");
   assert.ok(coach.body.cv_edits.length > 0, "Asisten Laboratorium can be reworded");
 
   const edit = coach.body.cv_edits[0];
@@ -175,6 +181,7 @@ test("bookmarks match across searches and can still open the CV coach after hist
   const { body: { search_id } } = await call("/searches", "POST", {});
   const repeated = await waitDone(search_id);
   const sameProgram = repeated.results.find((result) => result.name === bookmark.name);
+  assert.ok(sameProgram);
   assert.notEqual(sameProgram.id, bookmark.id);
   assert.ok(sameProgram.program_id);
   assert.equal(sameProgram.program_id, bookmark.program_id);

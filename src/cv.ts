@@ -7,16 +7,16 @@ const ACHIEVEMENT = /\b(juara|winner|champion|finalis|finalist|medali|medal|semi
 const INTERESTS = ["AI", "machine learning", "IoT", "robotik", "robotics", "energi", "energy", "embedded", "data science", "jaringan", "telekomunikasi", "elektronika", "power system", "kendali", "control", "web", "cyber security", "keamanan siber", "computer vision"];
 
 // Avoid copying common contact details and identifiers into suggested fields.
-export function redact(text) {
+export function redact(text: string) {
   return text
     .replace(/(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.]+/g, "[email]")
     .replace(/(\+62|\b0)8[\d\s-]{7,13}\d/g, "[telepon]")
     .replace(/\b\d{7,}\b/g, "[nomor]");
 }
 
-const toNumber = (s) => Number(String(s).replace(",", "."));
+const toNumber = (s: string) => Number(String(s).replace(",", "."));
 
-export function extractCvHeuristic(text, today) {
+export function extractCvHeuristic(text: string, today: string) {
   const fields: { ipk?: number; skor_bahasa?: number; prodi?: string; jenjang_saat_ini?: string; semester?: number; prestasi?: string; bidang_minat?: string } = {};
   const flat = text.replace(/\s+/g, " ");
 
@@ -50,7 +50,7 @@ export function extractCvHeuristic(text, today) {
   return fields;
 }
 
-export function parseCv(text, today) {
+export function parseCv(text: string, today: string) {
   const clean = redact(text).slice(0, MAX_CV_CHARS);
   return { fields: extractCvHeuristic(clean, today), source: "heuristik" };
 }
