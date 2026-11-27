@@ -1,6 +1,13 @@
 import { describe, test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { MAX_RESULTS } from '../src/catalog.ts';
+import type { Screen } from '@e2e-dev/core';
+
+// Phones keep the destinations in the "Menu" sheet; wider screens show them in the header.
+async function openSection(screen: Screen, name: string) {
+  if (process.env.BEASISWA_TEST_MOBILE === '1') await screen.getByRole('button', 'Menu').tap();
+  await screen.getByRole('navigation', 'Menu utama').getByRole('link', name).tap();
+}
 
 const profile = {
   jenjang_saat_ini: 'S1', jenjang_tujuan: 'S2', prodi: 'Teknik Elektro',
@@ -57,7 +64,7 @@ describe('Cari Beasiswa', () => {
 
     await card.getByRole('button', { name: /Simpan/ }).tap();
     await card.getByRole('button', { name: /Tersimpan/ }).waitFor();
-    await screen.getByRole('navigation', 'Menu utama').getByRole('link', 'Tersimpan').tap();
+    await openSection(screen, 'Tersimpan');
 
     await expect(screen.getByRole('heading', { name: 'Beasiswa Tersimpan' })).toBeVisible();
     await expect(screen.getByRole('heading', { name: 'Beasiswa LPDP Reguler' })).toBeVisible();
@@ -71,7 +78,7 @@ describe('Cari Beasiswa', () => {
     await browser.locator('#notes').fill('simulasi gagal');
     await screen.getByRole('button', { name: /Cari beasiswa/i }).tap();
     await screen.getByText('Pencarian gagal.', { exact: true }).waitFor();
-    await screen.getByRole('navigation', 'Menu utama').getByRole('link', 'Riwayat').tap();
+    await openSection(screen, 'Riwayat');
     const failed = browser.locator('tr').filter({ hasText: 'simulasi gagal' });
 
     await failed.getByRole('button', 'Hapus').tap();
