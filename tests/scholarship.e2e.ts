@@ -1,5 +1,6 @@
 import { describe, test } from '@e2e-dev/web';
 import { expect } from 'e2e';
+import { MAX_RESULTS } from '../src/catalog.ts';
 
 const profile = {
   jenjang_saat_ini: 'S1', jenjang_tujuan: 'S2', prodi: 'Teknik Elektro',
@@ -26,7 +27,7 @@ describe('Cari Beasiswa', () => {
 
     await expect(screen.getByRole('heading', { name: 'Hasil Pencarian' })).toBeVisible();
     await expect(screen.getByRole('heading', { name: 'Langkah agen' })).toBeVisible();
-    await expect(screen.getByRole('article')).toHaveCount(24);
+    await expect(screen.getByRole('article')).toHaveCount(MAX_RESULTS);
     await expect(browser.locator('[role=article][data-limited=true]').first()).toBeVisible();
   });
 

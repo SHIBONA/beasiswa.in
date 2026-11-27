@@ -47,7 +47,7 @@ export function ResultCard({ result: r, saved, busy = false, fromBookmarks = fal
             </p>
           </div>
           <p className="shrink-0 text-right" aria-label={`Skor kecocokan ${score} dari 100`}>
-            <span aria-hidden="true" className="block text-3xl font-semibold tabular-nums leading-none">{score}</span>
+            <span aria-hidden="true" className="block font-mono text-3xl font-medium tabular-nums leading-none">{score}</span>
             <span aria-hidden="true" className="text-xs text-muted-foreground">dari 100</span>
           </p>
         </div>
@@ -151,7 +151,7 @@ function Breakdown({ r }: { r: ApiResult }) {
                         <span className="block h-full rounded-full bg-primary" style={{ width: `${b.max ? Math.round((b.points / b.max) * 100) : 0}%` }} />
                       </span>
                     )}
-                  <span className={cn("tabular-nums", penalty && "text-destructive")}>{penalty ? b.points : `${b.points}/${b.max}`}</span>
+                  <span className={cn("font-mono text-xs tabular-nums", penalty && "text-destructive")}>{penalty ? b.points : `${b.points}/${b.max}`}</span>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="space-y-2 pb-3 text-sm">
                   <p className="font-medium">{b.detail}</p>
@@ -178,7 +178,7 @@ function Achievements({ r }: { r: ApiResult }) {
       <ul className="space-y-2 text-sm">
         {r.achievements.map((a) => (
           <li key={a.text} className="grid grid-cols-[2.5rem_1fr] gap-2">
-            <span className="tabular-nums text-muted-foreground">+{a.points}</span>
+            <span className="font-mono text-xs tabular-nums leading-5 text-muted-foreground">+{a.points}</span>
             <span>
               {a.text} <span className="text-muted-foreground">· {a.level}{a.relevant.length ? ` · cocok dengan ${a.relevant.join(", ")}` : ""}</span>
             </span>

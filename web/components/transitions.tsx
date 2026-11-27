@@ -21,9 +21,10 @@ export function Reveal({ children }: { children: ReactNode }) {
   return <ViewTransition enter="reveal" default="none">{children}</ViewTransition>;
 }
 
-// One item in a list that can lose items (history rows, saved cards): it fades out and the rest move up.
+// One item in a list that changes (history rows, saved cards, filtered opportunities): items that leave fade
+// out, items that arrive rise in, and the rest move to their new place.
 export function ListItem({ children }: { children: ReactNode }) {
-  return <ViewTransition exit="remove" update="auto" default="none">{children}</ViewTransition>;
+  return <ViewTransition enter="reveal" exit="remove" update="auto" default="none">{children}</ViewTransition>;
 }
 
 // Data updates that should animate go through here. Browsers refuse view transitions in a hidden tab

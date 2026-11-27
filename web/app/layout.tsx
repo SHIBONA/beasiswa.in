@@ -1,10 +1,16 @@
 import type { Metadata, Viewport } from "next";
+import { Figtree, JetBrains_Mono, Unbounded } from "next/font/google";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
+
+// Self-hosted by next/font at build time, so pages make no request to Google.
+const heading = Unbounded({ subsets: ["latin"], variable: "--font-unbounded", weight: ["500", "600"] });
+const body = Figtree({ subsets: ["latin"], variable: "--font-figtree" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains-mono" });
 
 export const metadata: Metadata = {
   title: "beasiswa.in · Cari Beasiswa",
@@ -23,7 +29,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   // Every page gets a fresh CSP nonce from proxy.ts, so pages render per request.
   await connection();
   return (
-    <html lang="id">
+    <html lang="id" className={`${heading.variable} ${body.variable} ${mono.variable}`}>
       <body className="flex min-h-dvh flex-col bg-background antialiased">
         <a
           href="#konten"

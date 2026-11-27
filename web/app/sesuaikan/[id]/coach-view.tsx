@@ -195,6 +195,9 @@ export function CoachView({ resultId, fromBookmarks }: { resultId: string; fromB
                 <LinkList links={g.links} />
               </div>
             )) : <Done>Profilmu sudah kuat untuk kriteria program ini. Fokus ke esai dan wawancara.</Done>}
+        <Link className="inline-flex items-center text-sm underline underline-offset-4 pointer-coarse:min-h-11" href="/development" transitionTypes={NAV.lateral}>
+          Lihat semua kursus, sertifikat, dan pengalaman
+        </Link>
           </section>
 
           <p className="border-t pt-6 text-sm text-muted-foreground">
@@ -259,8 +262,8 @@ function Compare({ report: p }: { report: PreviewReport }) {
   return (
     <div className="space-y-4 border-t pt-6">
       <p className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
-        <span><span className="text-sm text-muted-foreground">Sebelum </span><span className="text-2xl font-semibold tabular-nums">{p.before}</span></span>
-        <span><span className="text-sm text-muted-foreground">Sesudah </span><span className="text-2xl font-semibold tabular-nums">{p.after}</span></span>
+        <span><span className="text-sm text-muted-foreground">Sebelum </span><span className="font-mono text-2xl font-medium tabular-nums">{p.before}</span></span>
+        <span><span className="text-sm text-muted-foreground">Sesudah </span><span className="font-mono text-2xl font-medium tabular-nums">{p.after}</span></span>
         <span className="font-medium">{delta(p.after - p.before)} poin</span>
       </p>
       <Table>

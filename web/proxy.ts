@@ -47,6 +47,7 @@ function page(request: NextRequest) {
     "style-src 'self' 'unsafe-inline'",
     "connect-src 'self'",
     "img-src 'self' data:",
+    "font-src 'self'", // fonts are self-hosted by next/font
     "worker-src 'self'",
     "base-uri 'none'",
     "form-action 'self'",

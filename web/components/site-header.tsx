@@ -20,13 +20,13 @@ export function SiteHeader() {
         <Link
           href="/cari"
           transitionTypes={NAV.lateral}
-          className="inline-flex items-center rounded-md text-base font-semibold tracking-tight pointer-coarse:min-h-11 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:py-4"
+          className="inline-flex items-center rounded-md font-heading text-base font-medium tracking-tight pointer-coarse:min-h-11 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:py-4"
           translate="no"
         >
           beasiswa.in
         </Link>
         {/* On phones the four destinations become equal tabs on their own row. */}
-        <nav aria-label="Menu utama" className="grid w-full grid-cols-4 sm:ml-auto sm:flex sm:w-auto sm:gap-1">
+        <nav aria-label="Menu utama" className="grid w-full grid-cols-5 sm:ml-auto sm:flex sm:w-auto sm:gap-1">
           {SECTIONS.map(({ href, label }) => (
             <Link
               key={href}
@@ -36,7 +36,7 @@ export function SiteHeader() {
               data-slot="nav-link"
               aria-current={optimistic === href ? "page" : undefined}
               className={cn(
-                "relative flex items-center justify-center px-3 py-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:py-4",
+                "relative flex items-center justify-center px-1 py-3 text-sm sm:px-3 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:py-4",
                 optimistic === href && "font-medium text-foreground",
               )}
             >

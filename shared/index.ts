@@ -1,5 +1,6 @@
 // Contract between the API server (src/) and the web front-end (web/): the data the API stores and returns.
 export { publicWebUrl } from "./web-url";
+export * from "./opportunities";
 
 // Longest CV text the browser sends and the server reads.
 export const MAX_CV_CHARS = 30_000;

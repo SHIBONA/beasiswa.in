@@ -5,7 +5,7 @@
 // Options never add facts: each carries a condition the member must confirm is true.
 import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements, type BreakdownRow, type Profile, type Scholarship } from "./catalog.ts";
 
-import type { CoachReport, CvEdit, GrowthStep, HardGap, Link, PreviewReport, ProfileEdit } from "@beasiswa/shared";
+import { FIELD_COURSES, GROWTH, type CoachReport, type CvEdit, type GrowthStep, type HardGap, type Link, type PreviewReport, type ProfileEdit } from "@beasiswa/shared";
 type Fit = ReturnType<typeof scoreScholarship>;
 
 const MAX_OPTIONS = 3;
@@ -19,48 +19,7 @@ const FRAMES: Record<string, (t: string) => string> = {
 };
 const SCOPES = ["tingkat internasional", "tingkat nasional", "tingkat provinsi", "tingkat kampus"];
 
-// Links checked to respond (HTTP 200) on 2026-11-26; entries without url are advice only.
-const GROWTH: Record<string, Link[]> = {
-  bahasa: [
-    { title: "Tes & persiapan IELTS (IDP Indonesia)", url: "https://ielts.idp.com/indonesia", note: "Jadwal tes dan materi latihan resmi." },
-    { title: "TOEFL iBT (ETS)", url: "https://www.ets.org/toefl.html", note: "Alternatif IELTS; cek apakah program menerima TOEFL." },
-    { title: "Improve Your English (Coursera)", url: "https://www.coursera.org/specializations/improve-english", note: "Kursus online, materi bisa diakses gratis (audit)." },
-    { title: "Duolingo", url: "https://www.duolingo.com/", note: "Latihan harian kosakata dan listening." },
-  ],
-  riset: [
-    { title: "Google Scholar", url: "https://scholar.google.com/", note: "Baca paper di bidangmu; mulai dari review literatur atau replikasi riset bersama dosen." },
-    { title: "Kaggle Learn", url: "https://www.kaggle.com/learn", note: "Proyek data/ML kecil yang bisa jadi portofolio riset." },
-    { title: "PKM (Program Kreativitas Mahasiswa)", url: "", note: "Daftar lewat bagian kemahasiswaan kampus; karya ilmiah tingkat nasional." },
-  ],
-  kompetisi: [
-    { title: "Kaggle Competitions", url: "https://www.kaggle.com/competitions", note: "Kompetisi data science tingkat internasional." },
-    { title: "Lomba Puspresnas", url: "", note: "Tanyakan jadwal ke kemahasiswaan kampus; kompetisi tingkat nasional yang diakui." },
-  ],
-  kepemimpinan: [
-    { title: "Pengurus organisasi atau himpunan", url: "", note: "Ambil peran yang memimpin orang atau program, lalu catat hasilnya dengan angka (jumlah anggota, peserta, dana)." },
-    { title: "Indorelawan", url: "https://www.indorelawan.org/", note: "Koordinasi kegiatan relawan = bukti kepemimpinan dan kontribusi." },
-  ],
-  akademik: [
-    { title: "Dicoding", url: "https://www.dicoding.com/", note: "Kelas dan sertifikat teknologi berbahasa Indonesia." },
-    { title: "Google Career Certificates", url: "https://grow.google/certificates/", note: "Sertifikat profesional (data, IT support, UX)." },
-    { title: "Coursera", url: "https://www.coursera.org/", note: "Kursus universitas; sertifikat bisa dicantumkan di CV." },
-    { title: "edX", url: "https://www.edx.org/", note: "Kursus dari universitas internasional." },
-  ],
-  sosial: [
-    { title: "Indorelawan", url: "https://www.indorelawan.org/", note: "Cari kegiatan relawan sesuai minatmu." },
-    { title: "Indonesia Mengajar", url: "https://indonesiamengajar.org/", note: "Kegiatan dan program pendidikan." },
-  ],
-  kerja: [
-    { title: "LinkedIn Jobs", url: "https://www.linkedin.com/jobs/", note: "Cari magang atau kerja di bidangmu." },
-    { title: "Kalibrr", url: "https://www.kalibrr.id/", note: "Lowongan magang dan kerja di Indonesia." },
-  ],
-};
-const FIELD_COURSES = [
-  { match: /\bai\b|machine learning|data/i, title: "Machine Learning Crash Course (Google)", url: "https://developers.google.com/machine-learning/crash-course", note: "Gratis; dasar ML untuk portofolio." },
-  { match: /iot|jaringan|network|embedded|telekomunikasi|elektro/i, title: "Cisco Networking Academy", url: "https://www.netacad.com/", note: "Kursus dan sertifikat IoT serta jaringan." },
-  { match: /cloud|informatika|software|web|komputer/i, title: "AWS Skill Builder", url: "https://skillbuilder.aws/", note: "Kursus cloud dan jalur sertifikasi AWS." },
-];
-
+// Courses, certificates and experience to suggest live in shared/opportunities.ts (also used by /development).
 const fmt = (n: number) => Number(n).toFixed(2).replace(".", ",");
 const row = (fit: Fit, key: string) => fit.breakdown.find((b) => b.key === key);
 const joinItems = (items: string[]) => items.join("; ");
@@ -137,7 +96,7 @@ function hardGapsFor(profile: Profile, notes: string, program: Scholarship, base
     gaps.push({
       title: `Skor bahasa di bawah IELTS ${program.ielts}`, detail: bahasa.detail, quote: bahasa.quote, potential: potential({ skor_bahasa: program.ielts }),
       why: "Skor bahasa dibuktikan dengan sertifikat tes resmi. Mengubah CV tidak mengubah skor; satu-satunya jalan adalah tes ulang.",
-      actions: GROWTH.bahasa,
+      actions: GROWTH.bahasa.filter((o) => !o.language), // English tests and courses; local languages live on /development
     });
   }
   for (const b of base.breakdown.filter((x) => x.key === "penalti")) {
@@ -166,7 +125,8 @@ function growthFor(profile: Profile, program: Scholarship, base: Fit) {
     }
   }
   const field = `${profile.bidang_minat ?? ""} ${profile.prodi ?? ""}`;
-  const courses = FIELD_COURSES.filter((c) => c.match.test(field)).map(({ title, url, note }) => ({ title, url, note }));
+  const matched = FIELD_COURSES.filter((c) => c.match.test(field));
+  const courses = matched.filter((c, i) => matched.findIndex((x) => x.url === c.url) === i).map(({ title, url, note }) => ({ title, url, note }));
   if (courses.length) plan.push({ area: "sertifikasi sesuai bidangmu", why: `Sertifikat yang relevan dengan ${profile.prodi || "bidangmu"} memperkuat rencana studi dan bisa masuk CV sebagai prestasi akademik.`, quote: "", links: courses });
   return plan;
 }

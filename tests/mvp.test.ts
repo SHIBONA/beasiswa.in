@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyAchievement, discoveryCountries, matchCatalog, rankScholarships } from "../src/catalog.ts";
+import { MAX_RESULTS, classifyAchievement, discoveryCountries, matchCatalog, rankScholarships } from "../src/catalog.ts";
 import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
 import { checkQuota, validateProfile } from "../src/server.ts";
 import { extractCvHeuristic, redact } from "../src/cv.ts";
 import { missingEvidence, pickPages, toEntries, withHeadingDegree } from "../src/agent.ts";
 import { isBlocked, isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
 import { coachFor, previewFor } from "../src/coach.ts";
+import { FIELD_COURSES, OPPORTUNITIES, developmentPlan } from "@beasiswa/shared";
 import { CATALOG } from "../src/catalog.ts";
 import { openStore } from "../src/storage.ts";
 
@@ -290,15 +291,18 @@ const profile = { jenjang_saat_ini: "S1", jenjang_tujuan: "S2", prodi: "Teknik E
 
 test("demo matcher shows eligible programs first, limited ones after with labels", () => {
   const { results, eligible } = matchCatalog(profile, "fully funded Jepang", "2026-11-26");
-  assert.equal(results.length, 24);
+  assert.ok(CATALOG.length > MAX_RESULTS);
+  assert.equal(results.length, MAX_RESULTS);
   const ok = results.slice(0, eligible);
   const limited = results.slice(eligible);
   assert.ok(ok.every((r) => r.limits.length === 0 && r.level.split("/").includes("S2") && r.deadline >= "2026-11-26"));
   assert.ok(limited.length > 0 && limited.every((r) => r.limits.length > 0));
   assert.deepEqual(ok.map((r) => r.score), [...ok.map((r) => r.score)].sort((a, b) => b - a));
   assert.equal(results[0].name, "MEXT Research Student Scholarship");
-  const kip = results.find((r) => r.name.startsWith("KIP"));
-  assert.ok(kip);
+  // A program for another degree keeps its card, labelled and penalised (checked on its own: the display cap may cut it).
+  const kipProgram = CATALOG.find((x) => x.name.startsWith("KIP"));
+  assert.ok(kipProgram);
+  const [kip] = rankScholarships(profile, "fully funded Jepang", [kipProgram], "2026-11-26").results;
   assert.deepEqual(kip.limits, ["Bukan untuk S2"]);
   assert.ok(kip.breakdown.some((b) => b.key === "penalti" && b.points === -30));
 });
@@ -424,4 +428,26 @@ test("coach: says honestly when wording cannot help", () => {
   const c = coachFor({ ...profile, prestasi: strong }, "", LPDP);
   assert.equal(c.cv_edits.length, 0);
   assert.match(c.cv_note, /sudah/);
+});
+
+test("catalog and opportunity links are public https pages, and program names are unique", () => {
+  for (const { title, url } of [...OPPORTUNITIES, ...FIELD_COURSES]) {
+    assert.ok(url === "" || (url.startsWith("https://") && publicWebUrl(url)), `${title}: ${url}`);
+  }
+  for (const s of CATALOG) assert.ok(s.url.startsWith("https://") && publicWebUrl(s.url), `${s.name}: ${s.url}`);
+  assert.equal(new Set(CATALOG.map((s) => s.name)).size, CATALOG.length);
+});
+
+test("development plan starts a beginner with first experience, English and field courses", () => {
+  const beginner = { ...profile, prestasi: "", skor_bahasa: 0, negara_tujuan: "Jepang", prodi: "Teknik Elektro", bidang_minat: "IoT" };
+  const plan = developmentPlan(beginner);
+  assert.deepEqual(plan.map((step) => step.area), ["Pengalaman pertama", "Skor bahasa", "Bahasa negara tujuan", "Sertifikat sesuai bidangmu", "Riset dan pengalaman kerja"]);
+  assert.ok(plan[0].items.some((o) => o.kind === "lomba") && plan[0].items.some((o) => o.kind === "relawan"));
+  assert.ok(plan[1].items.every((o) => o.area === "bahasa" && !o.language));
+  assert.ok(plan[2].items.every((o) => o.language === "jepang"));
+  assert.ok(plan[3].items.some((o) => o.title === "Cisco Networking Academy"));
+
+  const ready = { ...profile, jenjang_tujuan: "S1", skor_bahasa: 7, negara_tujuan: "Australia", prodi: "Sastra", bidang_minat: "",
+    prestasi: "Juara 1 debat nasional; Ketua himpunan; Relawan mengajar" };
+  assert.deepEqual(developmentPlan(ready), []);
 });

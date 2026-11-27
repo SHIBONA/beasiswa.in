@@ -2,6 +2,7 @@
 export const SECTIONS = [
   { href: "/cari", label: "Cari" },
   { href: "/profil", label: "Profil" },
+  { href: "/development", label: "Persiapan" },
   { href: "/riwayat", label: "Riwayat" },
   { href: "/tersimpan", label: "Tersimpan" },
 ] as const;

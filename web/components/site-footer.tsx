@@ -12,7 +12,7 @@ export function SiteFooter() {
     <footer className="mt-24 overflow-hidden border-t">
       <div className="mx-auto grid max-w-3xl gap-10 px-4 pt-12 pb-10 sm:grid-cols-[1fr_auto_auto] sm:gap-16 sm:px-6">
         <div className="max-w-xs space-y-3">
-          <p className="font-semibold tracking-tight" translate="no">beasiswa.in</p>
+          <p className="font-heading font-medium tracking-tight" translate="no">beasiswa.in</p>
           <p className="text-sm text-muted-foreground">
             Pencari beasiswa untuk satu mahasiswa yang berjalan di komputermu. Profil, riwayat, dan bookmark disimpan di perangkat ini.
           </p>
@@ -40,7 +40,7 @@ export function SiteFooter() {
       <p
         aria-hidden="true"
         translate="no"
-        className="pointer-events-none -mb-[0.18em] text-center text-[19vw] leading-[0.8] font-semibold tracking-[-0.06em] whitespace-nowrap text-foreground/[0.07] select-none"
+        className="pointer-events-none -mb-[0.18em] text-center font-heading text-[15vw] leading-[0.8] font-semibold tracking-[-0.05em] whitespace-nowrap text-foreground/[0.07] select-none"
       >
         beasiswa.in
       </p>
