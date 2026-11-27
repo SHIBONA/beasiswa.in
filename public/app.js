@@ -223,7 +223,7 @@ async function viewResult(id) {
     return;
   }
   if (location.hash !== "#/hasil/" + id) return;
-  const { search, saved_ids } = data;
+  const { search, saved_ids, application_day } = data;
   const live = search.status === "queued" || search.status === "running";
   const countries = search.target_countries?.map((name) => name.replace(/\b\w/g, (c) => c.toUpperCase())).join(", ");
   const steps = search.steps.map((s, i) => `<li class="${live && i === search.steps.length - 1 ? "now" : ""}">${esc(s.text)}</li>`).join("");
@@ -240,27 +240,26 @@ async function viewResult(id) {
     ${search.status === "succeeded" ? `
       <div class="disclaimer">⚠️ ${DISCLAIMER}</div>
       ${METHOD_NOTE}
-      ${resultsList(search, saved_ids)}
-      ${search.mode === "firecrawl" ? "" : othersBlock(search.others)}` : ""}`;
+      ${resultsList(search, saved_ids, application_day)}
+      ${othersBlock(search.others)}` : ""}`;
   bindStars();
   clearTimeout(pollTimer);
   if (live) pollTimer = setTimeout(() => location.hash === "#/hasil/" + id && viewResult(id), POLL_MS);
 }
 
 // Eligible programs first; programs with hard limits stay visible below a divider, labelled.
-function resultsList(search, savedIds) {
-  if (search.mode === "firecrawl" && !Array.isArray(search.target_countries)) {
-    return `<div class="card">Pencarian lama ini dibuat sebelum pemeriksaan periode pendaftaran tersedia. <a href="#/cari">Mulai pencarian baru</a> untuk melihat beasiswa yang masih buka.</div>`;
-  }
+function resultsList(search, savedIds, applicationDay) {
+  const legacy = search.mode === "firecrawl" && !Array.isArray(search.target_countries);
+  const warning = legacy ? `<div class="disclaimer"><b>Riwayat lama.</b> Hasil ini dibuat sebelum pemeriksaan jenjang, lokasi, dan periode pendaftaran yang terbaru. Periksa kembali di sumber resmi.</div>` :
+    search.mode === "firecrawl" ? `<div class="hint">Pencarian dengan pemeriksaan terbaru. Status pendaftaran ditinjau berdasarkan tanggal hari ini.</div>` : "";
   if (!search.results.length) {
-    return `<div class="card">Belum ada beasiswa yang bisa dipastikan masih buka untuk tujuan ini dari sumber yang diperiksa.</div>`;
+    return warning + `<div class="card">Tidak ada hasil tersimpan untuk pencarian ini.</div>`;
   }
   const limited = (r) => (r.limits ?? []).length > 0;
   const ok = search.results.filter((r) => !limited(r));
   const rest = search.results.filter(limited);
-  const card = (r) => resultCard(r, savedIds.includes(r.id));
-  const summary = search.mode === "firecrawl" ? "pendaftaran masih buka" : "sesuai jenjang & deadline";
-  return `<p class="sub"><b>${search.results.length} beasiswa</b> · ${search.mode === "firecrawl" ? summary : `${ok.length} ${summary}`} ${rest.length ? `· ${rest.length} dengan catatan` : ""}</p>
+  const card = (r) => resultCard(r, savedIds.includes(r.id), false, search.mode === "firecrawl" ? { legacy, day: applicationDay } : null);
+  return warning + `<p class="sub"><b>${search.results.length} beasiswa</b> · hasil saat pencarian dilakukan${rest.length ? ` · ${rest.length} dengan catatan` : ""}</p>
     ${ok.map(card).join("")}
     ${rest.length ? `<div class="divider"><b>Tetap ditampilkan dengan batasan (${rest.length})</b><span class="hint">Periksa batasan pada setiap kartu, termasuk deadline dan sumber informasi.</span></div>${rest.map(card).join("")}` : ""}`;
 }
@@ -274,10 +273,16 @@ function othersBlock(others) {
     </li>`).join("")}</ul></details>`;
 }
 
-function resultCard(r, saved, fromBookmarks = false) {
+function resultCard(r, saved, fromBookmarks = false, history = null) {
   const color = r.score >= 75 ? "var(--ok)" : r.score >= 50 ? "var(--brand)" : "var(--warn)";
   const limits = r.limits ?? [];
   const evidence = r.program?.evidence;
+  const deadline = r.program?.deadline || r.deadline;
+  const periodWarning = history && (!deadline ? "Periode pendaftaran belum diketahui." :
+    history.day && deadline < history.day ? "Deadline sudah lewat." :
+    history.legacy ? "Hasil lama. Pastikan jenjang, lokasi, dan pendaftaran masih sesuai." :
+    r.program?.opens_at && history.day && r.program.opens_at > history.day ? "Pendaftaran belum dibuka." :
+    "Periode berdasarkan sumber saat pencarian. Periksa informasi terbaru.");
   const checked = r.program?.source_checked_at;
   const checkedDate = checked && Number.isFinite(Date.parse(checked))
     ? new Date(checked).toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "long", year: "numeric" })
@@ -287,6 +292,7 @@ function resultCard(r, saved, fromBookmarks = false) {
       <div class="score" style="--s:${Number(r.score) || 0}; --c:${color}" aria-label="Skor kecocokan ${Number(r.score) || 0}"><span>${Number(r.score) || 0}</span></div>
       <div>
         <h3>${esc(r.name)}</h3>
+        ${periodWarning ? `<p class="hint"><b>⚠ ${esc(periodWarning)}</b></p>` : ""}
         ${limits.length ? `<div class="limits">${limits.map((l) => `<span class="pill lim">⚠ ${esc(l)}</span>`).join("")}</div>` : ""}
         <div class="meta">
           <span class="pill">${esc(r.provider)}</span><span class="pill">📍 ${esc(r.country)}</span>
@@ -534,7 +540,7 @@ function historyTable(searches, deletable) {
     ${searches.map((s) => `<tr>
       <td>${fmtTime(s.created_at)}</td><td>${esc(s.notes || "-")}</td>
       <td><span class="pill ${esc(s.status)}">${esc(STATUS[s.status])}</span></td>
-      <td>${s.status === "succeeded" ? `${s.count} beasiswa<br><span class="hint">Teratas: ${esc(s.top)}</span>` : s.status === "failed" ? esc(s.error) : "…"}</td>
+      <td>${s.status === "succeeded" ? `${s.count} beasiswa${s.top ? `<br><span class="hint">Teratas: ${esc(s.top)}</span>` : ""}${s.mode === "firecrawl" ? `<br><span class="hint">${s.verified_search ? "Pemeriksaan terbaru" : "Riwayat lama · cek kembali sumber"}</span>` : ""}` : s.status === "failed" ? esc(s.error) : "…"}</td>
       <td><div class="row"><a href="#/hasil/${esc(s.id)}">Lihat</a>${deletable && s.status !== "running" && s.status !== "queued" ? `<button class="ghost del" data-id="${esc(s.id)}" style="padding:4px 10px">Hapus</button>` : ""}</div></td>
     </tr>`).join("")}</tbody></table></div>`;
 }

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.mjs";
+import { agentMode, firecrawlDestinations, runSearch } from "./agent.mjs";
 import { MAX_CV_CHARS, parseCv } from "./cv.mjs";
 import { coachFor, previewFor } from "./coach.mjs";
 import { openStore } from "./storage.mjs";
@@ -203,13 +203,7 @@ async function api(req, res, path) {
     }
     const search = activeSearch?.id === id ? activeSearch : store.search(id);
     if (!search) return send(res, 404, { error: "Pencarian tidak ditemukan." });
-    if (method === "GET") {
-      const day = applicationDay(search);
-      const results = search.mode === "firecrawl" && Array.isArray(search.target_countries)
-        ? search.results.filter((result) => hasOpenApplication(result.program ?? {}, day))
-        : search.results;
-      return send(res, 200, { search: { ...search, results }, saved_ids: store.savedIds(id) });
-    }
+    if (method === "GET") return send(res, 200, { search, application_day: applicationDay(search), saved_ids: store.savedIds(id) });
     if (method === "DELETE") {
       if (search.status === "running" || search.status === "queued") return send(res, 409, { error: "Pencarian masih berjalan." });
       const day = today();

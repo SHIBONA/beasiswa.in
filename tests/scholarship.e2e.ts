@@ -94,4 +94,14 @@ describe('Cari Beasiswa', () => {
     await expect(privateCard.getByRole('link')).toHaveCount(0);
     await expect(publicCard.getByRole('link')).toHaveAttribute('href', 'https://example.com/program#syarat');
   });
+
+  test('shows legacy and expired Firecrawl results with warnings', async ({ app, screen, browser }) => {
+    const result = { id: 'legacy:0', name: 'Beasiswa lama', level: 'S2', deadline: '2020-01-01', score: 50, url: 'https://example.com', limits: [] };
+    const search = { id: 'legacy', mode: 'firecrawl', status: 'succeeded', created_at: '2020-01-01T00:00:00Z', notes: '', steps: [], results: [result] };
+    await browser.route('**/api/searches/legacy', (route) => route.fulfill({ json: { search, saved_ids: [], application_day: '2026-11-27' } }));
+    await app.open('/#/hasil/legacy');
+    await expect(screen.getByText(/Riwayat lama/)).toBeVisible();
+    await expect(screen.getByRole('heading', { name: 'Beasiswa lama' })).toBeVisible();
+    await expect(screen.getByText(/Deadline sudah lewat/)).toBeVisible();
+  });
 });
