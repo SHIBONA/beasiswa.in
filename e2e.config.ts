@@ -18,7 +18,8 @@ export default {
         args: ['server.mjs'],
         env: {
           PORT: '{port}',
-          DATA_FILE: `.e2e/data-${randomUUID()}.json`,
+          DATABASE_FILE: `.e2e/data-${randomUUID()}.sqlite`,
+          DATA_FILE: '.e2e/no-legacy-data.json',
           FIRECRAWL_API_KEY: '',
           ANTHROPIC_API_KEY: '',
           DEMO_STEP_MS: '5',

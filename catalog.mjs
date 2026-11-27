@@ -213,6 +213,10 @@ export function limitsOf(s, profile, today) {
 }
 
 // Shared by all modes: every program is scored; eligible ones first, then limited ones, best first.
+export function programIdentity({ name, provider, country }) {
+  return [name, provider, country].map((value) => String(value ?? "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " "));
+}
+
 export function rankScholarships(profile, notes, scholarships, today) {
   const results = scholarships.map((s) => ({
     name: s.name, provider: s.provider, country: s.country, level: s.levels.join("/") || "Tidak tertulis", funding: s.funding,

@@ -1,6 +1,9 @@
 .env
+.env.local
 data.json
 data.json.tmp
 data.json.tmp-*
+*.sqlite
+*.sqlite-*
 node_modules/
 .e2e/

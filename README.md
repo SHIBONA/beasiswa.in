@@ -1,8 +1,10 @@
 # beasiswa.in — agen pencari beasiswa (prototipe)
 
-Prototipe **Cari Beasiswa** untuk satu pengguna di komputer lokal. Profil, riwayat, dan hasil tersimpan berbagi satu berkas JSON.
+Prototipe **Cari Beasiswa** untuk satu pengguna di komputer lokal. Aplikasi menyimpan profil, riwayat, dan bookmark di SQLite tanpa server database terpisah.
 
 ## Jalankan
+
+Gunakan Node.js 24.8+ pada lini 24 LTS (atau 22.22.3+ pada lini 22).
 
 ```bash
 npm ci
@@ -16,7 +18,7 @@ Mode LIVE (agen Claude sungguhan, cari di web):
 ANTHROPIC_API_KEY=sk-ant-... node server.mjs      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; node server.mjs
 ```
 
-Mode FIRECRAWL dipakai otomatis bila `.env` berisi `FIRECRAWL_API_KEY=...`. Aplikasi menjalankan 5 kueri, membaca maksimal 10 halaman, mencocokkan kutipan dengan teks sumber, menghitung skor, lalu mencari artikel awardee untuk maksimal 5 program. Biaya dan waktu bergantung pada halaman dan kebijakan penyedia.
+Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.example .env` di PowerShell), isi `FIRECRAWL_API_KEY` dengan key akun Anda, lalu jalankan ulang aplikasi. Mode Firecrawl aktif otomatis. Aplikasi menjalankan 5 kueri, memeriksa maksimal 10 halaman, mencocokkan kutipan dengan teks sumber, menghitung skor, lalu mencari artikel awardee untuk maksimal 5 program. Data hasil ekstraksi dapat dipakai ulang jika sumber diperiksa dalam 24 jam terakhir. Kartu menampilkan tanggal pemeriksaan saat tersedia. Kueri pencarian tetap memakai Firecrawl.
 
 | Mode | Sumber hasil | Biaya |
 |---|---|---|
@@ -33,7 +35,7 @@ Mode FIRECRAWL dipakai otomatis bila `.env` berisi `FIRECRAWL_API_KEY=...`. Apli
 | S2 Mulai pencarian + catatan | ✅ API balas `202` + `search_id`, jalan di background |
 | S3 Status live | ✅ polling 1,2 dtk, langkah agen tampil satu per satu |
 | S4 Hasil berskor | ✅ hingga 30 program dengan alasan kecocokan dan tautan sumber. Program berbeda jenjang atau berakhir tetap muncul dengan label. |
-| S5 Simpan | ✅ toggle idempoten (`PUT`/`DELETE /api/saved/:id`) |
+| S5 Simpan | ✅ satu bookmark per program lintas pencarian. Sesuaikan CV tetap tersedia setelah riwayat asal dihapus. |
 | S6 Riwayat | ✅ urut terbaru + hapus riwayat (privasi) |
 | S7 Kuota | ✅ 5 pencarian berhasil/hari, 1 berjalan, maksimal 10 percobaan berbayar/hari → `429` + `Retry-After` |
 | S8 Gagal | ✅ status `failed`, pesan jelas, kuota tidak terpakai |
@@ -45,7 +47,9 @@ Mode FIRECRAWL dipakai otomatis bila `.env` berisi `FIRECRAWL_API_KEY=...`. Apli
 - Aset JavaScript dan worker PDF dilayani dari origin aplikasi. Kebijakan CSP membatasi skrip dan koneksi ke origin sendiri, serta melarang pemuatan aplikasi dalam frame. CV dibatasi 5 MB, 15 halaman, 30.000 karakter, dan 15 detik pembacaan dokumen.
 - Penyedia web menerima jenjang, kategori negara/bidang yang dikenali, dan preferensi umum pendanaan. IPK, skor bahasa, teks CV, prestasi, dan catatan bebas dipakai di aplikasi lokal. Jika negara belum dikenali, pencarian web memakai kueri umum.
 - URL penyedia diperiksa format dan domainnya. Label sumber didasarkan pada domain institusi atau penyelenggara yang dikenal. Kutipan yang ditemukan di halaman tetap perlu dibaca dalam konteks program dan periode.
-- Simpan API key di `.env` lokal. Git mengecualikan `.env`, `data.json`, dan hasil tes browser.
+- Simpan API key di `.env` lokal. Git mengecualikan file ini, database lokal, dan hasil tes browser.
+
+Saat pertama dijalankan, aplikasi membuat `data.sqlite` dan mengimpor `data.json` lama jika tersedia. Berkas JSON asli tetap ada sebagai cadangan. Program diidentifikasi dari nama, penyelenggara, dan negara. Periode dengan deadline berbeda dicatat terpisah, dan riwayat tetap menyimpan skor dari saat pencarian dilakukan.
 
 ## Naskah demo (±3 menit)
 
@@ -57,7 +61,7 @@ Mode FIRECRAWL dipakai otomatis bila `.env` berisi `FIRECRAWL_API_KEY=...`. Apli
 6. Catatan `simulasi gagal` → status Gagal, kuota tidak berkurang.
 7. **Riwayat** → tunjukkan daftar, hapus satu.
 
-Reset data demo: hentikan server, hapus `data.json`.
+Untuk mencadangkan data, hentikan server lalu salin `data.sqlite` dan berkas pendamping `data.sqlite-*` jika ada. Untuk membuat penyimpanan baru, jalankan dengan `DATABASE_FILE` yang menunjuk ke berkas baru dan `DATA_FILE` yang menunjuk ke nama JSON yang belum ada.
 
 ## Tes
 

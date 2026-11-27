@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { classifyAchievement, matchCatalog, rankScholarships } from "./catalog.mjs";
 import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "./agent.mjs";
 import { checkQuota, validateProfile } from "./server.mjs";
@@ -8,6 +11,7 @@ import { pickPages, toEntries } from "./agent.mjs";
 import { isOfficial, publicWebUrl, verifyQuote } from "./firecrawl.mjs";
 import { coachFor, previewFor } from "./coach.mjs";
 import { CATALOG } from "./catalog.mjs";
+import { openStore } from "./storage.mjs";
 
 const PAGE = `# Beasiswa Reguler
 | Persyaratan | Pendaftar jenjang **Magister** wajib memiliki IPK sekurang-kurangnya 3,00 pada skala 4,00 |
@@ -90,7 +94,7 @@ test("malformed provider items are skipped or reduced to bounded facts", () => {
   assert.equal(result.funding, "Tidak tertulis");
 });
 
-test("Firecrawl workflow uses bounded discovery inputs and retains only source-backed quotes", async (t) => {
+test("Firecrawl keeps source quotes and reuses fresh extraction across searches", async (t) => {
   const providerKey = process.env.FIRECRAWL_API_KEY;
   process.env.FIRECRAWL_API_KEY = "test-fixture-never-used";
   t.after(() => {
@@ -117,11 +121,26 @@ test("Firecrawl workflow uses bounded discovery inputs and retains only source-b
   });
 
   const notes = "Jepang, catatan-pribadi@example.com";
-  const output = await runSearch(profile, notes, () => {}, "2026-11-26");
+  const dir = mkdtempSync(join(tmpdir(), "beasiswa-cache-"));
+  const path = join(dir, "data.sqlite");
+  const legacy = join(dir, "data.json");
+  let cache = openStore(path, legacy);
+  t.after(() => {
+    cache.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const output = await runSearch(profile, notes, () => {}, "2026-11-26", cache);
   assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
   assert.equal(output.results.length, 1);
   assert.equal(output.results[0].program.evidence.ipk, quote);
   assert.equal(output.results[0].program.evidence.bahasa, "");
+  assert.ok(Number.isFinite(Date.parse(output.results[0].program.source_checked_at)));
+  cache.close();
+  cache = openStore(path, legacy);
+  const repeated = await runSearch(profile, notes, () => {}, "2026-11-26", cache);
+  assert.equal(repeated.usage.firecrawl_pages, 0);
+  assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
+  assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
 });
 

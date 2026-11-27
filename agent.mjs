@@ -2,7 +2,7 @@
 // firecrawl (FIRECRAWL_API_KEY): Firecrawl search + scrape + JSON extraction with verified quotes.
 // live (ANTHROPIC_API_KEY): Claude + web_search/web_fetch.
 // demo (no key): scripted steps over catalog.mjs so the flow can be recorded offline.
-import { CATALOG, WEIGHTS, discoveryCountries, rankScholarships } from "./catalog.mjs";
+import { CATALOG, WEIGHTS, discoveryCountries, programIdentity, rankScholarships } from "./catalog.mjs";
 import { hostOf, isBlocked, isOfficial, pool, publicWebUrl, scrapeJson, search, verifyQuote } from "./firecrawl.mjs";
 
 const MODEL = "claude-opus-5-5";
@@ -26,7 +26,7 @@ export function searchProfile(p) {
   return Object.fromEntries(keys.map((k) => [k, p[k]]));
 }
 
-export async function runSearch(profile, notes, onStep, today) {
+export async function runSearch(profile, notes, onStep, today, sourceCache) {
   const mode = agentMode();
   if (mode === "demo" && /^simulasi gagal$/i.test(notes)) {
     onStep("Mencari di web…");
@@ -37,7 +37,7 @@ export async function runSearch(profile, notes, onStep, today) {
   onStep(profileLine(safe));
   onStep(`Tujuan: ${safe.jenjang_tujuan} di ${safe.negara_tujuan || "semua negara"}${safe.butuh_pendanaan ? " · butuh pendanaan penuh" : ""}${notes ? ` · catatan "${notes}"` : ""}`);
   const run = { firecrawl: runFirecrawl, live: runLive, demo: runDemo }[mode];
-  return run(safe, notes, onStep, today);
+  return run(safe, notes, onStep, today, sourceCache);
 }
 
 const achievementCount = (p) => String(p.prestasi ?? "").split(/;|\n/).filter((x) => x.trim().length > 3).length;
@@ -337,7 +337,9 @@ export function pickPages(searchResults, limit) {
   return { pages: ordered.slice(0, limit), rest: ordered.slice(limit), total: searchResults.length, duplicates, blocked, official: officials.length };
 }
 
-async function runFirecrawl(p, notes, onStep, today) {
+const SOURCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+async function runFirecrawl(p, notes, onStep, today, sourceCache) {
   // Only generic keywords go to Firecrawl: no IPK, no achievements, no identity.
   const queries = firecrawlQueries(p, notes, today.slice(0, 4));
   onStep(`Menyusun ${queries.length} kueri Firecrawl Search dari kategori umum (Bahasa Indonesia + Inggris)`);
@@ -349,16 +351,27 @@ async function runFirecrawl(p, notes, onStep, today) {
   });
 
   const { pages, rest, total, duplicates, blocked, official } = pickPages(found.filter((r) => !r?.error).flat(), FC_MAX_PAGES);
-  onStep(`Menyaring ${total} URL: ${duplicates} duplikat & ${blocked} media sosial dibuang, ${official} situs resmi didahulukan → ${pages.length} halaman dibaca, ${rest.length} disimpan sebagai kandidat lain`);
-  onStep(`Firecrawl Scrape: membaca ${pages.length} halaman (paralel ${FC_CONCURRENCY}); halaman daftar diekstrak per beasiswa…`);
+  onStep(`Menyaring ${total} URL: ${duplicates} duplikat & ${blocked} media sosial dibuang, ${official} situs resmi didahulukan → ${pages.length} halaman diperiksa, ${rest.length} disimpan sebagai kandidat lain`);
+  onStep(`Firecrawl Scrape: memeriksa ${pages.length} halaman dan memakai ulang sumber yang masih baru…`);
 
   let quotes = 0;
   let verified = 0;
+  let scrapeRequests = 0;
+  const cutoff = new Date(Date.now() - SOURCE_MAX_AGE_MS).toISOString();
   const scraped = await pool(pages, FC_CONCURRENCY, async (page) => {
+    const key = normalizeUrl(page.url);
+    const cached = sourceCache?.readSource(key, cutoff);
+    if (cached) {
+      onStep(`Memakai ulang ${hostOf(page.url)} → ${cached.length} beasiswa dari pemeriksaan terakhir`);
+      return cached;
+    }
+    scrapeRequests += 1;
     const { json, markdown, finalUrl } = await scrapeJson(page.url, FC_SCHEMA, FC_PROMPT);
     const host = hostOf(finalUrl);
-    const entries = toEntries(json, markdown, finalUrl);
+    const checkedAt = new Date().toISOString();
+    const entries = toEntries(json, markdown, finalUrl).map((entry) => ({ ...entry, source_checked_at: checkedAt }));
     if (!entries.length) { onStep(`Membaca ${host} → tidak ada program beasiswa di halaman ini`); return []; }
+    sourceCache?.writeSource(key, checkedAt, entries, cutoff);
     const ok = entries.reduce((n, e) => n + quoteCount(e), 0);
     quotes += askedQuotes(json);
     verified += ok;
@@ -374,7 +387,7 @@ async function runFirecrawl(p, notes, onStep, today) {
   const failedPages = scraped.filter((r) => r?.error).length;
   if (failedPages) onStep(`${failedPages} halaman gagal dibaca atau ditolak.`);
   const entries = dedupe(scraped.filter((r) => Array.isArray(r)).flat());
-  onStep(`Validasi kutipan: ${verified} dari ${quotes} kutipan cocok kata per kata dengan teks halaman; sisanya tidak ditampilkan`);
+  if (scrapeRequests) onStep(`Validasi kutipan baru: ${verified} dari ${quotes} cocok kata per kata dengan teks halaman`);
 
   const { results, expired } = rankScholarships(p, notes, entries, today);
   if (results.length === 0) throw Object.assign(new Error("Tidak ada hasil Firecrawl"), {
@@ -391,13 +404,13 @@ async function runFirecrawl(p, notes, onStep, today) {
 
   const out = await finish(p, results, expired, onStep);
   const others = rest.slice(0, FC_MAX_OTHERS).map(({ url, title, description }) => ({ url, title, description }));
-  return { ...out, others, usage: { firecrawl_searches: queries.length + top.length, firecrawl_pages: pages.length } };
+  return { ...out, others, usage: { firecrawl_searches: queries.length + top.length, firecrawl_pages: scrapeRequests } };
 }
 
 function dedupe(entries) {
   const seen = new Set();
   return entries.filter((e) => {
-    const key = e.name.toLowerCase().replace(/\s+/g, " ").trim();
+    const key = JSON.stringify([...programIdentity(e), e.deadline]);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
