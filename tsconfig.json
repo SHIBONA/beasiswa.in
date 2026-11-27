@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["src", "shared", "scripts", "tests", "e2e.config.ts"]
+  "include": ["src", "shared", "scripts", "eval", "tests", "e2e.config.ts"]
 }

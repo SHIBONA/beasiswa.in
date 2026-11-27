@@ -364,17 +364,29 @@ function matchesStudyDestination(entry: WebScholarship, destinations: string[]) 
     advertised.includes(place) && (place !== "jepang" || /\b(?:in japan|di jepang)\b|日本(?:で|の|国内|にある)/i.test(cite)));
 }
 
-export async function readTargetPage(url: string, target: string, destinations: string[], today: string) {
-  const prompt = `${FC_PROMPT} Cari beasiswa jenjang ${target} (S1 sarjana, S2 magister, S3 doktor, Exchange pertukaran) untuk negara studi ${destinations.join(", ") || "mana saja"}. Tanggal saat ini ${today}. Ambil periode pendaftaran terbaru, termasuk yang akan dibuka atau yang baru ditutup, asalkan tanggalnya tertulis. Untuk setiap hasil, kutip lokasi kampus dan tanggal mulai serta tanggal tutup pendaftaran beasiswa untuk jalur dan periode yang sama. Pilih kutipan yang memuat hari, bulan dan tahun. Jika tanggal mulai tidak disebut, kutip pernyataan bahwa pendaftaran sedang dibuka untuk periode tersebut. Jangan gunakan jadwal pengumuman, pendaftaran reguler kampus atau periode yang lebih lama dari periode terbaru. Untuk program di Jepang, kutip bahwa studi berlangsung di Jepang.`;
-  const { json, markdown, finalUrl } = await scrapeJson(url, FC_SCHEMA, prompt);
-  const checkedAt = new Date().toISOString();
+// The extraction instructions for one page; eval/extraction runs other models with the same text.
+export function extractionPrompt(target: string, destinations: string[], today: string) {
+  return `${FC_PROMPT} Cari beasiswa jenjang ${target} (S1 sarjana, S2 magister, S3 doktor, Exchange pertukaran) untuk negara studi ${destinations.join(", ") || "mana saja"}. Tanggal saat ini ${today}. Ambil periode pendaftaran terbaru, termasuk yang akan dibuka atau yang baru ditutup, asalkan tanggalnya tertulis. Untuk setiap hasil, kutip lokasi kampus dan tanggal mulai serta tanggal tutup pendaftaran beasiswa untuk jalur dan periode yang sama. Pilih kutipan yang memuat hari, bulan dan tahun. Jika tanggal mulai tidak disebut, kutip pernyataan bahwa pendaftaran sedang dibuka untuk periode tersebut. Jangan gunakan jadwal pengumuman, pendaftaran reguler kampus atau periode yang lebih lama dari periode terbaru. Untuk program di Jepang, kutip bahwa studi berlangsung di Jepang.`;
+}
+
+// Turns one extracted page into cards that have every piece of evidence, plus why the rest were left out.
+// Shared by the live search and eval/extraction, so the eval scores what the app would show.
+export function reviewPage(json: unknown, markdown: string, finalUrl: string, target: string, destinations: string[]) {
   const pageType = record(json).page_type;
   const reviewed = toEntries(json, markdown, finalUrl)
     .map((entry) => withHeadingDegree(entry, markdown, pageType, target))
     .map((entry) => ({ entry, reason: missingEvidence(entry, pageType, target, destinations) }));
-  const entries = reviewed.filter(({ reason }) => !reason).map(({ entry }) => ({ ...entry, source_checked_at: checkedAt }));
-  const rejected = reviewed.flatMap(({ entry, reason }) => (reason ? [{ name: entry.name, reason }] : []));
-  return { entries, rejected, checkedAt, finalUrl, quotes: askedQuotes(json) };
+  return {
+    entries: reviewed.filter(({ reason }) => !reason).map(({ entry }) => entry),
+    rejected: reviewed.flatMap(({ entry, reason }) => (reason ? [{ name: entry.name, reason }] : [])),
+  };
+}
+
+export async function readTargetPage(url: string, target: string, destinations: string[], today: string) {
+  const { json, markdown, finalUrl } = await scrapeJson(url, FC_SCHEMA, extractionPrompt(target, destinations, today));
+  const checkedAt = new Date().toISOString();
+  const { entries, rejected } = reviewPage(json, markdown, finalUrl, target, destinations);
+  return { entries: entries.map((entry) => ({ ...entry, source_checked_at: checkedAt })), rejected, checkedAt, finalUrl, quotes: askedQuotes(json) };
 }
 
 // The extractor sometimes quotes a sentence without the degree although the page title names it, as in

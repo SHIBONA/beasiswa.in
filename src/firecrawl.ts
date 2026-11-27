@@ -88,6 +88,15 @@ export async function search(query: string, limit: number): Promise<SearchHit[]>
   }) : [];
 }
 
+// Page text only, without extraction; eval/extraction stores pages with it so models can be compared offline.
+export async function scrapeMarkdown(url: string) {
+  if (isBlocked(url)) throw new Error("URL sumber tidak diizinkan.");
+  const { data } = await call("/scrape", { url, onlyMainContent: true, formats: ["markdown"] });
+  const finalUrl = publicWebUrl(data?.metadata?.url ?? data?.metadata?.sourceURL ?? url);
+  if (!finalUrl || isBlocked(finalUrl.href)) throw new Error("URL akhir sumber tidak diizinkan.");
+  return { markdown: typeof data?.markdown === "string" ? data.markdown : "", finalUrl: finalUrl.href };
+}
+
 export async function scrapeJson(url: string, schema: object, prompt: string) {
   if (isBlocked(url)) throw new Error("URL sumber tidak diizinkan.");
   const { data } = await call("/scrape", { url, onlyMainContent: true, formats: ["markdown", { type: "json", schema, prompt }] });
