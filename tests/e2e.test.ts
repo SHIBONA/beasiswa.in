@@ -16,7 +16,7 @@ const dir = mkdtempSync(join(tmpdir(), "beasiswa-e2e-"));
 let server;
 
 const call = async (path: string, method = "GET", body?: unknown) => {
-  const res = await fetch(BASE + path, { method, headers: { "Content-Type": "application/json" }, body: body && JSON.stringify(body) });
+  const res = await fetch(BASE + path, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   return { status: res.status, body: await res.json() };
 };
 const waitDone = async (id) => {
@@ -64,7 +64,7 @@ Teknis: IoT, embedded system, machine learning dasar`;
 test("local HTTP security headers protect the page and private API", async () => {
   const page = await fetch(ORIGIN);
   assert.equal(page.status, 200);
-  const csp = page.headers.get("content-security-policy");
+  const csp = page.headers.get("content-security-policy") ?? "";
   assert.match(csp, /script-src 'self'(?:;|$)/);
   assert.match(csp, /worker-src 'self'/);
   assert.match(csp, /frame-ancestors 'none'/);
@@ -76,12 +76,13 @@ test("local HTTP security headers protect the page and private API", async () =>
 });
 
 test("browser-origin restrictions block foreign requests and keep normal access", async () => {
-  for (const headers of [
+  const foreign: Record<string, string>[] = [
     { Origin: "https://example.test" },
     { Origin: "null" },
     { "Sec-Fetch-Site": "same-site" },
     { "Sec-Fetch-Site": "cross-site" },
-  ]) {
+  ];
+  for (const headers of foreign) {
     const result = await fetch(BASE + "/profile", { headers });
     assert.equal(result.status, 403);
     assert.equal(result.headers.get("access-control-allow-origin"), null);

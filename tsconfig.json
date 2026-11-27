@@ -6,7 +6,8 @@
     "allowImportingTsExtensions": true,
     "allowJs": true,
     "noEmit": true,
-    "strict": false,
+    "strict": true,
+    "noImplicitAny": false,
     "skipLibCheck": true,
     "types": ["bun"]
   },

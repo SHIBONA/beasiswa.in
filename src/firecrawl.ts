@@ -45,7 +45,7 @@ async function call(path, body) {
 
 async function readResponse(response) {
   const reader = response.body.getReader();
-  const chunks = [];
+  const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     for (;;) {
@@ -66,19 +66,22 @@ async function readResponse(response) {
 
 export async function search(query, limit) {
   const { data } = await call("/search", { query, limit, location: "Indonesia" });
-  return Array.isArray(data?.web) ? data.web.slice(0, limit).filter((r) => !isBlocked(r?.url)).map((r) => ({
-    url: publicWebUrl(r.url).href,
-    title: typeof r.title === "string" ? r.title.slice(0, 240) : "",
-    description: typeof r.description === "string" ? r.description.slice(0, 400) : "",
-  })) : [];
+  return Array.isArray(data?.web) ? data.web.slice(0, limit).flatMap((r) => {
+    const url = publicWebUrl(r?.url);
+    return url && !isBlocked(url.href) ? [{
+      url: url.href,
+      title: typeof r.title === "string" ? r.title.slice(0, 240) : "",
+      description: typeof r.description === "string" ? r.description.slice(0, 400) : "",
+    }] : [];
+  }) : [];
 }
 
 export async function scrapeJson(url, schema, prompt) {
   if (isBlocked(url)) throw new Error("URL sumber tidak diizinkan.");
   const { data } = await call("/scrape", { url, onlyMainContent: true, formats: ["markdown", { type: "json", schema, prompt }] });
-  const finalUrl = data?.metadata?.url ?? data?.metadata?.sourceURL ?? url;
-  if (isBlocked(finalUrl)) throw new Error("URL akhir sumber tidak diizinkan.");
-  return { json: data?.json ?? null, markdown: typeof data?.markdown === "string" ? data.markdown : "", finalUrl: publicWebUrl(finalUrl).href };
+  const finalUrl = publicWebUrl(data?.metadata?.url ?? data?.metadata?.sourceURL ?? url);
+  if (!finalUrl || isBlocked(finalUrl.href)) throw new Error("URL akhir sumber tidak diizinkan.");
+  return { json: data?.json ?? null, markdown: typeof data?.markdown === "string" ? data.markdown : "", finalUrl: finalUrl.href };
 }
 
 // Runs tasks with a small concurrency cap; keeps result order; a failed task yields { error }.

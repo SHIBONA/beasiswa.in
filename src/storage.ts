@@ -67,7 +67,7 @@ function legacyData(path) {
     if (!Array.isArray(data.searches) || !Array.isArray(data.saved)) throw new Error("Struktur data.json tidak valid.");
     return data;
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return null;
   }
 }
@@ -82,7 +82,7 @@ export function openStore(path, legacyPath) {
   try {
     writeFileSync(path, "", { flag: "wx", mode: 0o600 });
   } catch (error) {
-    if (error.code !== "EEXIST") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
   const db = new Database(path, { strict: true });
   db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");

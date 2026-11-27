@@ -14,7 +14,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 try {
   process.loadEnvFile(join(ROOT, ".env"));
 } catch (error) {
-  if (error.code !== "ENOENT") throw error;
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 }
 const LEGACY_PATH = process.env.DATA_FILE || join(ROOT, "data.json");
 const DATABASE_PATH = process.env.DATABASE_FILE || (process.env.DATA_FILE ? `${LEGACY_PATH}.sqlite` : join(ROOT, "data.sqlite"));
@@ -46,6 +46,9 @@ const SECURITY_HEADERS = {
 const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 const applicationDay = ({ target_countries }) => target_countries?.length === 1 && target_countries[0] === "jepang"
   ? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : today();
+
+// Errors thrown with a client-safe message (publicMessage) or an HTTP status for the response.
+type PublicError = Error & { status?: number; publicMessage?: string };
 
 let store;
 let activeSearch;
@@ -101,7 +104,8 @@ async function startSearch(search, profile) {
     store.transaction(() => store.saveSearch({
       ...search, status: "succeeded", results: ranked, expired, usage, others, duration_ms: Date.now() - started,
     }));
-  } catch (error) {
+  } catch (caught) {
+    const error = caught as PublicError;
     console.error(`Pencarian ${search.id} gagal (${error.name}).`);
     try {
       store.saveSearch({
@@ -124,7 +128,7 @@ async function readJson(req, limit = MAX_BODY_BYTES) {
     throw Object.assign(new Error("Body terlalu besar"), { status: 413 });
   }
   let size = 0;
-  const chunks = [];
+  const chunks: Buffer[] = [];
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
     if (size > limit) throw Object.assign(new Error("Body terlalu besar"), { status: 413 });
@@ -279,7 +283,7 @@ async function serveStatic(req, res, path) {
     res.writeHead(200, { "Content-Type": type, "Content-Length": body.length, "Cache-Control": "no-cache" });
     res.end(req.method === "HEAD" ? undefined : body);
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     send(res, 404, { error: "Berkas tidak ditemukan." });
   }
 }
@@ -288,13 +292,14 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
   for (const [header, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(header, value);
   const host = req.headers.host;
   const port = req.socket.localPort;
-  if (![ `localhost:${port}`, `127.0.0.1:${port}` ].includes(host)) {
+  if (!host || ![`localhost:${port}`, `127.0.0.1:${port}`].includes(host)) {
     return send(res, 403, { error: "Buka aplikasi dari alamat lokal." }, { Connection: "close" });
   }
-  if (!req.url.startsWith("/") || req.url.startsWith("//") || req.url.includes("\\")) {
+  const url = req.url ?? "";
+  if (!url.startsWith("/") || url.startsWith("//") || url.includes("\\")) {
     return send(res, 400, { error: "Alamat tidak valid." }, { Connection: "close" });
   }
-  const path = req.url.split("?")[0];
+  const path = url.split("?")[0];
   try {
     if (path.startsWith("/api/")) {
       const { origin, "sec-fetch-site": site } = req.headers;
@@ -304,7 +309,8 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
       return await api(req, res, path);
     }
     return await serveStatic(req, res, path);
-  } catch (error) {
+  } catch (caught) {
+    const error = caught as PublicError;
     if (!error.status) console.error(`Permintaan gagal (${error.name}).`);
     send(res, error.status ?? 500, { error: error.status ? error.message : "Terjadi kesalahan server." }, { Connection: "close" });
   }
