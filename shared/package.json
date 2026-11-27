@@ -1,0 +1,10 @@
+{
+  "name": "@beasiswa/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Types and helpers shared by the API server (src/) and the web front-end (web/).",
+  "exports": {
+    ".": "./index.ts"
+  }
+}

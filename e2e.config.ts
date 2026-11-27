@@ -15,9 +15,10 @@ export default {
       url: 'http://127.0.0.1:0',
       command: {
         executable: process.execPath,
-        args: ['src/server.ts'],
+        args: ['scripts/start.ts'],
         env: {
           PORT: '{port}',
+          API_PORT: '0',
           DATABASE_FILE: `.e2e/data-${randomUUID()}.sqlite`,
           DATA_FILE: '.e2e/no-legacy-data.json',
           FIRECRAWL_API_KEY: '',

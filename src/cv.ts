@@ -1,6 +1,7 @@
 // CV -> scholarship profile fields. The browser extracts PDF text; the CV file is never stored.
 // Extract academic fields locally in every search mode.
-export const MAX_CV_CHARS = 30_000;
+import { MAX_CV_CHARS } from "@beasiswa/shared";
+export { MAX_CV_CHARS };
 
 const PRODI_WORDS = "Teknik|Pendidikan|Ilmu|Sistem|Manajemen|Akuntansi|Informatika|Matematika|Fisika|Kimia|Biologi|Statistika|Psikologi|Hukum|Kedokteran|Farmasi|Arsitektur|Desain|Sastra|Bahasa|Ekonomi|Agribisnis|Keperawatan|Rekayasa";
 const ACHIEVEMENT = /\b(juara|winner|champion|finalis|finalist|medali|medal|semifinal|best|terbaik|awardee|penerima beasiswa|lolos|runner[- ]up|honorable|ketua|kepala divisi|koordinator|presiden|president|head of|asisten|assistant|magang|intern|relawan|volunteer)\b/i;

@@ -5,12 +5,7 @@
 // Options never add facts: each carries a condition the member must confirm is true.
 import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements, type BreakdownRow, type Profile, type Scholarship } from "./catalog.ts";
 
-type Link = { title: string; url: string; note: string };
-type CvOption = { text: string; why: string; condition: string; after: number; delta: number };
-type CvEdit = { index: number; original: string; level: string; tags: string[]; options: CvOption[] };
-type ProfileEdit = { field: string; value: string; label: string; condition: string; after: number; delta: number };
-type HardGap = { title: string; detail: string; quote: string; potential: number; why: string; actions: Link[] };
-type GrowthStep = { area: string; why: string; quote: string; links: Link[] };
+import type { CoachReport, CvEdit, GrowthStep, HardGap, Link, PreviewReport, ProfileEdit } from "@beasiswa/shared";
 type Fit = ReturnType<typeof scoreScholarship>;
 
 const MAX_OPTIONS = 3;
@@ -176,7 +171,7 @@ function growthFor(profile: Profile, program: Scholarship, base: Fit) {
   return plan;
 }
 
-export function coachFor(profile: Profile, notes: string, program: Scholarship) {
+export function coachFor(profile: Profile, notes: string, program: Scholarship): CoachReport {
   const base = scoreScholarship(profile, notes, program);
   const { items, edits } = cvEditsFor(profile, notes, program, base);
   const profileEdits = profileEditsFor(profile, notes, program, base);
@@ -199,7 +194,7 @@ export function coachFor(profile: Profile, notes: string, program: Scholarship) 
 }
 
 // Re-score a member-edited profile against the same program: per-component before/after.
-export function previewFor(profile: Profile, notes: string, program: Scholarship, patch: Partial<Profile>) {
+export function previewFor(profile: Profile, notes: string, program: Scholarship, patch: Partial<Profile>): PreviewReport {
   const before = scoreScholarship(profile, notes, program);
   const after = scoreScholarship({ ...profile, ...patch }, notes, program);
   // One reference row per component, in first-seen order; the "after" row wins when both have it.

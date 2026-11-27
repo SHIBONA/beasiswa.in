@@ -2,25 +2,8 @@
 // EXAMPLE values for the demo video. Live mode (ANTHROPIC_API_KEY set) searches the web instead.
 // values = what the program rewards in achievements: riset, kompetisi, kepemimpinan, akademik, sosial.
 
-// The member's saved profile, as validated by the server.
-export type Profile = {
-  jenjang_saat_ini: string; jenjang_tujuan: string; prodi: string; ipk: number; semester: number;
-  negara_tujuan: string; bidang_minat: string; skor_bahasa: number; prestasi: string; butuh_pendanaan: boolean;
-};
-export type Criterion = { text: string; quote: string };
-// Sentences verified on the official page (Firecrawl mode); empty when not found.
-export type Evidence = {
-  jenjang: string; lokasi: string; pembukaan: string; ipk: string; bahasa: string;
-  deadline: string; pendanaan: string; kerja: string; kriteria: Criterion[];
-};
-// Program facts from the demo catalog or extracted from the web; the scorer reads only these.
-export type Scholarship = {
-  name: string; provider: string; country: string; countries: string[]; levels: string[]; funding: string;
-  deadline: string; url: string; requirements: string; fields: string[]; values: string[];
-  min_gpa?: number; ielts?: number; min_sem?: number; max_sem?: number; work_years?: number; need_based?: boolean;
-  evidence?: Evidence; official?: boolean; source?: string;
-  opens_at?: string; application_status?: string; source_checked_at?: string;
-};
+import type { BreakdownRow, Criterion, Evidence, Insight, Profile, RankedResult, Scholarship, ScoredAchievement } from "@beasiswa/shared";
+export type { BreakdownRow, Criterion, Evidence, Insight, Profile, RankedResult, Scholarship };
 
 export const CATALOG: Scholarship[] = [
   { name: "Beasiswa LPDP Reguler", provider: "LPDP, Kementerian Keuangan RI", country: "Indonesia & luar negeri", countries: ["indonesia", "jepang", "inggris", "australia", "jerman", "amerika serikat", "belanda", "korea selatan", "hong kong", "singapura", "tiongkok", "taiwan", "prancis", "swedia", "kanada", "selandia baru"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-03-31", url: "https://lpdp.kemenkeu.go.id/", min_gpa: 3.0, ielts: 6.5, fields: ["semua"], values: ["kepemimpinan", "sosial", "riset"], requirements: "IPK min 3,00 (S2); IELTS 6.5 untuk luar negeri; kampus tujuan ada di daftar PT LPDP; komitmen kembali ke Indonesia." },
@@ -102,7 +85,6 @@ export function classifyAchievement(text: string) {
 export const splitAchievements = (s: unknown) => String(s ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
 
 type Achievement = ReturnType<typeof classifyAchievement>;
-type ScoredAchievement = { text: string; level: string; relevant: string[]; points: number };
 
 function scoreAchievements(items: Achievement[], values: string[]) {
   const scored = items.map((a): ScoredAchievement => {
@@ -118,8 +100,6 @@ export function opensLevel(levels: string[], targetLevel: string) {
   const target = norm(targetLevel);
   return levels.some((level) => target === "exchange" ? norm(level).startsWith("exchange") : norm(level) === target);
 }
-
-export type BreakdownRow = { key: string; label: string; points: number; max: number; detail: string; rule: string; quote: string };
 
 export function scoreScholarship(profile: Profile, notes: string, s: Scholarship) {
   const levelOk = opensLevel(s.levels, profile.jenjang_tujuan);
@@ -204,9 +184,6 @@ export function scoreScholarship(profile: Profile, notes: string, s: Scholarship
   return { score, reasons, gaps, breakdown, achievements: scored, insight: buildInsight(s, breakdown, relevant, values, ev) };
 }
 
-// One selection stage of the program-specific explanation shown on each result card.
-export type Insight = { label: string; ok: boolean; text: string; quotes?: Criterion[] };
-
 export const VALUE_LABELS: Record<string, string> = { riset: "riset & karya ilmiah", kompetisi: "prestasi kompetisi", kepemimpinan: "kepemimpinan", akademik: "prestasi akademik", sosial: "kontribusi sosial" };
 
 // Program-specific explanation by selection stage: administration (hard gates) -> substance -> fit.
@@ -252,7 +229,7 @@ export function programIdentity({ name, provider, country }: { name?: unknown; p
 }
 
 export function rankScholarships(profile: Profile, notes: string, scholarships: Scholarship[], today: string) {
-  const results = scholarships.map((s) => ({
+  const results = scholarships.map((s): RankedResult => ({
     name: s.name, provider: s.provider, country: s.country, level: s.levels.join("/") || "Tidak tertulis", funding: s.funding,
     deadline: s.deadline, requirements: s.requirements, url: s.url, source: s.source ?? "demo",
     limits: limitsOf(s, profile, today), ...scoreScholarship(profile, notes, s),
@@ -262,7 +239,5 @@ export function rankScholarships(profile: Profile, notes: string, scholarships: 
   results.sort((a, b) => Number(a.limits.length > 0) - Number(b.limits.length > 0) || b.score - a.score);
   return { results: results.slice(0, MAX_RESULTS), expired, eligible: results.filter((r) => !r.limits.length).length };
 }
-
-export type RankedResult = ReturnType<typeof rankScholarships>["results"][number];
 
 export const matchCatalog = (profile: Profile, notes: string, today: string) => rankScholarships(profile, notes, CATALOG, today);

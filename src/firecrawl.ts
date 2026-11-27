@@ -1,7 +1,7 @@
 // Firecrawl client (search + scrape with JSON extraction). Needs FIRECRAWL_API_KEY.
 // Every quote the extractor returns is checked against the page markdown before it is shown.
 import { CATALOG } from "./catalog.ts";
-import { publicWebUrl } from "../public/web-url.mjs";
+import { publicWebUrl, type SearchHit } from "@beasiswa/shared";
 export { publicWebUrl };
 
 const API = "https://api.firecrawl.dev/v2";
@@ -73,7 +73,7 @@ async function readResponse(response: Response) {
   }
 }
 
-export type SearchHit = { url: string; title: string; description: string };
+export type { SearchHit };
 
 export async function search(query: string, limit: number): Promise<SearchHit[]> {
   const { data } = await call("/search", { query, limit, location: "Indonesia" });

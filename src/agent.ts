@@ -6,6 +6,7 @@ import type { BetaContentBlock, BetaMessageParam } from "@anthropic-ai/sdk/resou
 import { CATALOG, WEIGHTS, discoveryCountries, opensLevel, programIdentity, rankScholarships, type Evidence, type Profile, type RankedResult, type Scholarship } from "./catalog.ts";
 import { failed, hostOf, isBlocked, isOfficial, pool, publicWebUrl, record, scrapeJson, search, verifyQuote, type SearchHit } from "./firecrawl.ts";
 import type { openStore } from "./storage.ts";
+import type { AgentResult } from "@beasiswa/shared";
 
 const MODEL = "claude-opus-5-5";
 const MAX_PAUSE_RESUMES = 6;
@@ -32,7 +33,7 @@ type Step = (text: string) => void;
 type SourceCache = Pick<ReturnType<typeof openStore>, "readSource" | "writeSource">;
 // Entries read by Firecrawl always carry their quotes.
 type WebScholarship = Scholarship & { evidence: Evidence };
-export type AgentResult = RankedResult & { awardee_refs?: SearchHit[] };
+export type { AgentResult };
 type SearchOutcome = { results: AgentResult[]; expired: number; usage: Record<string, number> | null };
 
 export async function runSearch(profile: Profile, notes: string, onStep: Step, today: string, sourceCache?: SourceCache): Promise<SearchOutcome> {
