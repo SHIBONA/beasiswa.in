@@ -5,7 +5,7 @@
   "type": "module",
   "description": "beasiswa.in: agen pencari beasiswa (prototipe demo).",
   "scripts": {
-    "start": "bun server.mjs",
+    "start": "bun src/server.mjs",
     "test": "bun test",
     "test:browser": "bun --bun e2e run"
   },

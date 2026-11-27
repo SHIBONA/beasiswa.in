@@ -1,7 +1,7 @@
 // Firecrawl client (search + scrape with JSON extraction). Needs FIRECRAWL_API_KEY.
 // Every quote the extractor returns is checked against the page markdown before it is shown.
 import { CATALOG } from "./catalog.mjs";
-import { publicWebUrl } from "./public/web-url.mjs";
+import { publicWebUrl } from "../public/web-url.mjs";
 export { publicWebUrl };
 
 const API = "https://api.firecrawl.dev/v2";

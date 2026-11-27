@@ -9,7 +9,7 @@ import { MAX_CV_CHARS, parseCv } from "./cv.mjs";
 import { coachFor, previewFor } from "./coach.mjs";
 import { openStore } from "./storage.mjs";
 
-const ROOT = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // API keys (FIRECRAWL_API_KEY / ANTHROPIC_API_KEY) live in .env, never in source.
 try {
   process.loadEnvFile(join(ROOT, ".env"));

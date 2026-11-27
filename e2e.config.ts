@@ -15,7 +15,7 @@ export default {
       url: 'http://127.0.0.1:0',
       command: {
         executable: process.execPath,
-        args: ['server.mjs'],
+        args: ['src/server.mjs'],
         env: {
           PORT: '{port}',
           DATABASE_FILE: `.e2e/data-${randomUUID()}.sqlite`,

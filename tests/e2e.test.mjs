@@ -29,7 +29,7 @@ const waitDone = async (id) => {
 };
 
 async function startServer(env = {}) {
-  server = spawn(process.execPath, [fileURLToPath(new URL("./server.mjs", import.meta.url))], {
+  server = spawn(process.execPath, [fileURLToPath(new URL("../src/server.mjs", import.meta.url))], {
     env: { ...process.env, PORT: String(PORT), DATA_FILE: join(dir, "data.json"), DEMO_STEP_MS: "5", FIRECRAWL_API_KEY: "", ANTHROPIC_API_KEY: "", ...env },
     stdio: "ignore",
   });

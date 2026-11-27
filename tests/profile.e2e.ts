@@ -6,7 +6,7 @@ describe('Profil Beasiswa', () => {
     await app.open('/#/profil');
     await screen.getByRole('button', 'Upload CV (PDF)').waitFor();
 
-    await browser.locator('#cvfile').setInputFiles('contoh-cv.pdf');
+    await browser.locator('#cvfile').setInputFiles('tests/fixtures/contoh-cv.pdf');
 
     await expect(browser.locator('#cvstatus')).toContainText('kolom terisi dari CV');
     await expect(screen.getByLabel('Program studi')).toHaveValue('Teknik Elektro');
