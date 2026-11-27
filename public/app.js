@@ -228,7 +228,7 @@ async function viewResult(id) {
   const steps = search.steps.map((s, i) => `<li class="${live && i === search.steps.length - 1 ? "now" : ""}">${esc(s.text)}</li>`).join("");
   app.innerHTML = `
     <div class="row" style="justify-content:space-between">
-      <div><h1>Hasil Pencarian</h1><p class="sub">${fmtTime(search.created_at)}${search.notes ? " · “" + esc(search.notes) + "”" : ""}</p></div>
+      <div><h1>Hasil Pencarian</h1><p class="sub">${search.target_level ? "Tujuan " + esc(search.target_level) + " · " : ""}${fmtTime(search.created_at)}${search.notes ? " · “" + esc(search.notes) + "”" : ""}</p></div>
       <span class="pill ${esc(search.status)}">${esc(STATUS[search.status])}</span>
     </div>
     <div class="card" aria-live="polite">
@@ -254,7 +254,7 @@ function resultsList(search, savedIds) {
   const card = (r) => resultCard(r, savedIds.includes(r.id));
   return `<p class="sub"><b>${search.results.length} beasiswa</b>: ${ok.length} sesuai jenjang & deadline, ${rest.length} ditampilkan dengan batasan. Diurutkan dari skor tertinggi.</p>
     ${ok.map(card).join("")}
-    ${rest.length ? `<div class="divider"><b>Tetap ditampilkan dengan batasan (${rest.length})</b><span class="hint">Jenjang berbeda, deadline periode ini lewat, atau sumber agregator. Berguna sebagai referensi dan untuk periode berikutnya.</span></div>${rest.map(card).join("")}` : ""}`;
+    ${rest.length ? `<div class="divider"><b>Tetap ditampilkan dengan batasan (${rest.length})</b><span class="hint">Periksa batasan pada setiap kartu, termasuk deadline dan sumber informasi.</span></div>${rest.map(card).join("")}` : ""}`;
 }
 
 function othersBlock(others) {
@@ -285,6 +285,7 @@ function resultCard(r, saved, fromBookmarks = false) {
           <span class="pill">⏰ ${esc(fmtDate(r.deadline))}</span>
         </div>
         ${checkedDate ? `<p class="hint">Sumber diperiksa ${esc(checkedDate)}</p>` : ""}
+        ${r.program?.evidence?.jenjang ? `<details><summary>Bukti jenjang dari sumber</summary><blockquote>${esc(r.program.evidence.jenjang)}</blockquote></details>` : ""}
         <p class="req"><b>Syarat ringkas:</b> ${esc(r.requirements)}</p>
         ${insightBlock(r)}
         ${breakdownBlock(r)}

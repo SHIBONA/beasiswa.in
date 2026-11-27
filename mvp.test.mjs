@@ -114,8 +114,19 @@ test("Firecrawl keeps source quotes and reuses fresh extraction across searches"
       return Response.json({ success: true, data: { web: [{ url: programUrl }, { url: "https://localhost" }] } });
     }
     assert.equal(body.url, programUrl);
-    return Response.json({ success: true, data: { markdown: PAGE, metadata: { url: programUrl }, json: {
-      page_type: "program", scholarships: [{ name: "Program LPDP", countries: ["jepang"], levels: ["S2"],
+    const degreeQuote = "Program LPDP membiayai studi sarjana dan magister.";
+    const prerequisite = "Beasiswa Doktor untuk lulusan S2.";
+    const admission = "Pendaftaran Magister Teknik Elektro telah dibuka.";
+    return Response.json({ success: true, data: { markdown: [PAGE, degreeQuote, prerequisite, admission].join("\n"), metadata: { url: programUrl }, json: {
+      page_type: "daftar", scholarships: [
+        { name: "Program LPDP", countries: ["jepang"], levels: ["S1"] },
+        { name: "Undergraduate only", levels: ["S1"], requirements: "Mahasiswa sarjana" },
+        { name: "Jenjang belum diketahui", levels: [] },
+        { name: "Pelatihan", levels: ["S2"], level_quote: degreeQuote },
+        { name: "Beasiswa Doktor", levels: ["S2"], level_quote: prerequisite },
+        { name: "Magister Teknik Elektro", levels: ["S2"], level_quote: admission },
+        { name: "Program Tanpa Bukti", levels: ["S2"], level_quote: "Program Tanpa Bukti membiayai studi S2" },
+        { name: "Program LPDP", countries: ["jepang"], levels: ["S1", "S2"], level_quote: degreeQuote,
         min_gpa: 3, min_gpa_quote: quote, ielts: 6.5, ielts_quote: "IELTS 7.0 wajib" }],
     } } });
   });
@@ -132,6 +143,9 @@ test("Firecrawl keeps source quotes and reuses fresh extraction across searches"
   const output = await runSearch(profile, notes, () => {}, "2026-11-26", cache);
   assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
   assert.equal(output.results.length, 1);
+  assert.deepEqual(output.results[0].program.levels, ["S1", "S2"]);
+  const discovery = requests.filter((r) => r.path === "/v2/search" && !r.body.query.includes("awardee"));
+  assert.ok(discovery.every((r) => /S2|master/i.test(r.body.query)));
   assert.equal(output.results[0].program.evidence.ipk, quote);
   assert.equal(output.results[0].program.evidence.bahasa, "");
   assert.ok(Number.isFinite(Date.parse(output.results[0].program.source_checked_at)));
@@ -139,8 +153,11 @@ test("Firecrawl keeps source quotes and reuses fresh extraction across searches"
   cache = openStore(path, legacy);
   const repeated = await runSearch(profile, notes, () => {}, "2026-11-26", cache);
   assert.equal(repeated.usage.firecrawl_pages, 0);
+  assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2"]);
   assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
   assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
+  await assert.rejects(runSearch({ ...profile, jenjang_tujuan: "S3" }, notes, () => {}, "2026-11-26", cache),
+    (error) => error.publicMessage?.includes("S3"));
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
 });
 

@@ -181,7 +181,7 @@ async function api(req, res, path) {
       if (typeof notes !== "string" || notes.length > 300) return send(res, 422, { error: "Catatan maksimal 300 karakter." });
       const day = today();
       const mode = agentMode();
-      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
       const blocked = store.transaction(() => {
         const quota = checkQuota(store.quotaSearches(day), day, new Date(), store.count("deleted", day));
         if (quota) return quota;

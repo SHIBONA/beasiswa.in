@@ -89,9 +89,13 @@ function scoreAchievements(items, values) {
 }
 
 // ---------- Score: 6 weighted components + penalties, all shown to the member ----------
+export function opensLevel(levels, targetLevel) {
+  const target = norm(targetLevel);
+  return levels.some((level) => target === "exchange" ? norm(level).startsWith("exchange") : norm(level) === target);
+}
+
 export function scoreScholarship(profile, notes, s) {
-  const target = norm(profile.jenjang_tujuan);
-  const levelOk = s.levels.some((l) => (target === "exchange" ? norm(l).startsWith("exchange") : norm(l) === target));
+  const levelOk = opensLevel(s.levels, profile.jenjang_tujuan);
 
   const notesText = norm(notes);
   const gpa = Number(profile.ipk) || 0;
@@ -202,10 +206,9 @@ const LOCAL_ONLY = /local students only|for local students|permanent (citizens?|
 
 // Hard limits do not hide a program; they label it and push it below the eligible ones.
 export function limitsOf(s, profile, today) {
-  const target = norm(profile.jenjang_tujuan);
   const limits = [];
   if (!s.levels.length) limits.push("Jenjang tidak tertulis");
-  else if (!s.levels.some((l) => (target === "exchange" ? norm(l).startsWith("exchange") : norm(l) === target))) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
+  else if (!opensLevel(s.levels, profile.jenjang_tujuan)) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
   if (isExpired(s.deadline, today)) limits.push("Deadline periode ini lewat, pantau periode berikutnya");
   if (s.official === false) limits.push("Sumber belum terverifikasi sebagai penyelenggara, cek ke situs resmi");
   if (LOCAL_ONLY.test(`${s.name} ${s.requirements ?? ""}`)) limits.push("Tampaknya khusus warga lokal, cek kelayakan WNI");

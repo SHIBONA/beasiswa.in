@@ -2,7 +2,7 @@
 // firecrawl (FIRECRAWL_API_KEY): Firecrawl search + scrape + JSON extraction with verified quotes.
 // live (ANTHROPIC_API_KEY): Claude + web_search/web_fetch.
 // demo (no key): scripted steps over catalog.mjs so the flow can be recorded offline.
-import { CATALOG, WEIGHTS, discoveryCountries, programIdentity, rankScholarships } from "./catalog.mjs";
+import { CATALOG, WEIGHTS, discoveryCountries, opensLevel, programIdentity, rankScholarships } from "./catalog.mjs";
 import { hostOf, isBlocked, isOfficial, pool, publicWebUrl, scrapeJson, search, verifyQuote } from "./firecrawl.mjs";
 
 const MODEL = "claude-opus-5-5";
@@ -81,8 +81,7 @@ function buildQueries(p, notes, year) {
 }
 
 async function runDemo(p, notes, onStep, today) {
-  const target = String(p.jenjang_tujuan).toLowerCase();
-  const levelOk = (s) => s.levels.some((l) => (target === "exchange" ? l.toLowerCase().startsWith("exchange") : l.toLowerCase() === target));
+  const levelOk = (s) => opensLevel(s.levels, p.jenjang_tujuan);
   const countOf = (kind) => CATALOG.filter((s) => levelOk(s) && (kind !== "gov" || s.countries.includes("indonesia")) && (kind !== "field" || !s.fields.includes("semua"))).length;
 
   const queries = buildQueries(p, notes, today.slice(0, 4));
@@ -256,9 +255,10 @@ const FC_ITEM = {
     provider: { type: "string" },
     study_location: { type: "string", description: "Lokasi studi, Bahasa Indonesia" },
     countries: { type: "array", items: { type: "string" }, description: "Negara tempat studi, Bahasa Indonesia, huruf kecil" },
-    levels: { type: "array", items: { type: "string", enum: LEVELS } },
+    levels: { type: "array", items: { type: "string", enum: LEVELS }, description: "Jenjang studi yang dibiayai program ini. Isi array kosong jika jenjang yang dibiayai tidak tertulis." },
+    level_quote: quoteField("Bukti bahwa beasiswa ini membiayai jenjang tujuan. Pada halaman daftar, kutipan harus mencantumkan nama program dan jenjang yang dibiayai dalam satu entri"),
     funding: { type: "string", enum: ["Penuh", "Sebagian", ""] },
-    funding_quote: quoteField("Bukti cakupan dana"),
+    funding_quote: quoteField("Bukti bahwa program ini menawarkan beasiswa atau bantuan biaya studi, termasuk cakupan dana jika tertulis"),
     deadline: { type: "string", description: "Batas pendaftaran periode terbaru, format YYYY-MM-DD, kosong jika tidak ada" },
     deadline_quote: quoteField("Bukti tanggal batas pendaftaran"),
     min_gpa: { type: ["number", "null"], description: "IPK minimal skala 4" },
@@ -286,7 +286,39 @@ export const FC_SCHEMA = {
   },
   required: ["page_type", "scholarships"],
 };
-const FC_PROMPT = `Ambil semua program beasiswa yang dijelaskan di halaman ini (maks ${FC_MAX_PER_PAGE}) untuk pelamar dari Indonesia. Halaman daftar/artikel boleh berisi banyak beasiswa: ambil masing-masing dengan fakta yang tertulis. Setiap field *_quote dan quote harus kalimat ASLI yang tertulis di halaman (jangan diterjemahkan atau diringkas). Kosongkan bila tidak tertulis. Jangan menebak.`;
+const FC_PROMPT = `Ambil maksimal ${FC_MAX_PER_PAGE} beasiswa untuk pelamar dari Indonesia. Salin nama asli program sebagaimana tertulis. Pada halaman daftar, pisahkan setiap jalur dan ambil bukti dari entri yang sama. Setiap kutipan harus berupa teks ASLI dari halaman. Jangan memasukkan program penerimaan mahasiswa biasa atau menebak jenjang dari gelar yang disyaratkan untuk mendaftar.`;
+
+const DEGREE_TERMS = {
+  S1: /\b(?:s[\s-]?1|sarjana|bachelor(?:['’]?s)?|undergraduate)\b/i,
+  S2: /\b(?:s[\s-]?2|magister|master(?:['’]?s)?|m\.?sc|m\.?eng|mba)\b/i,
+  S3: /\b(?:s[\s-]?3|doktor(?:al)?|doctor(?:al|ate)|ph\.?d)\b/i,
+  Exchange: /\b(?:exchange|pertukaran)\b/i,
+};
+
+function mentionsStudyLevel(quote, target) {
+  // Remove mentions of a previous qualification, preserving a separate funded degree in the same sentence.
+  const degree = DEGREE_TERMS[target].source;
+  const prerequisite = new RegExp(`(?:lulusan|telah menyelesaikan|memiliki (?:gelar|ijazah)|hold(?:ing)?|already have)\\s+(?:(?:program|pendidikan|studi|gelar|an?)\\s+)*${degree}|${degree}(?:\\s+degree)?\\s+(?:is required for admission|is a prerequisite)`, "gi");
+  return DEGREE_TERMS[target].test(quote.replace(prerequisite, ""));
+}
+
+export function hasAwardEvidence(evidence) {
+  return /\b(?:beasiswa|scholarships?|fellowships?|stipends?|membiayai|dibiayai|ditanggung|tunjangan|funded|funding|tuition (?:fee )?(?:waiver|exemption)|financial (?:aid|support)|bantuan (?:biaya|pendidikan))\b/i
+    .test(`${evidence.jenjang} ${evidence.pendanaan}`);
+}
+
+export async function readTargetPage(url, target) {
+  const prompt = `${FC_PROMPT} Cari jenjang studi yang dibiayai: ${target}. S1 = sarjana, S2 = magister, S3 = doktor, Exchange = pertukaran. Gunakan level_quote untuk membuktikan program ini menawarkan studi pada jenjang tujuan. Jika tidak ada bukti atau halaman hanya menyebut pendidikan sebelumnya, abaikan program itu.`;
+  const { json, markdown, finalUrl } = await scrapeJson(url, FC_SCHEMA, prompt);
+  const checkedAt = new Date().toISOString();
+  const entries = toEntries(json, markdown, finalUrl).filter((entry) => {
+    const quote = entry.evidence.jenjang;
+    if (!opensLevel(entry.levels, target) || !mentionsStudyLevel(quote, target) || !hasAwardEvidence(entry.evidence)) return false;
+    // A degree quoted for another scholarship on a directory page cannot support this card.
+    return json.page_type === "program" || quote.toLowerCase().includes(entry.name.toLowerCase());
+  }).map((entry) => ({ ...entry, source_checked_at: checkedAt }));
+  return { entries, checkedAt, finalUrl, quotes: askedQuotes(json) };
+}
 
 // Shapes one extracted scholarship into a catalog-like entry; numbers stay, quotes only when found on the page.
 function toEntry(item, markdown, url, official) {
@@ -294,6 +326,7 @@ function toEntry(item, markdown, url, official) {
   if (!name) return null;
   const q = (text) => verifyQuote(text, markdown);
   const evidence = {
+    jenjang: q(item.level_quote),
     ipk: q(item.min_gpa_quote), bahasa: q(item.ielts_quote), deadline: q(item.deadline_quote), pendanaan: q(item.funding_quote), kerja: q(item.work_quote),
     kriteria: array(item.selection_criteria, 4).map((c) => ({ text: plainText(c?.criterion, 120), quote: q(c?.quote) })).filter((c) => c.quote),
   };
@@ -315,9 +348,9 @@ export function toEntries(json, markdown, url) {
   return array(json.scholarships, FC_MAX_PER_PAGE).map((item) => toEntry(item, markdown, normalizeUrl(url), official)).filter(Boolean);
 }
 
-const quoteCount = (e) => [e.evidence.ipk, e.evidence.bahasa, e.evidence.deadline, e.evidence.pendanaan, e.evidence.kerja].filter(Boolean).length + e.evidence.kriteria.length;
+const quoteCount = (e) => [e.evidence.jenjang, e.evidence.ipk, e.evidence.bahasa, e.evidence.deadline, e.evidence.pendanaan, e.evidence.kerja].filter(Boolean).length + e.evidence.kriteria.length;
 const askedQuotes = (json) => array(json?.scholarships, FC_MAX_PER_PAGE)
-  .flatMap((i) => [i?.min_gpa_quote, i?.ielts_quote, i?.deadline_quote, i?.funding_quote, i?.work_quote, ...array(i?.selection_criteria, 4).map((c) => c?.quote)])
+  .flatMap((i) => [i?.level_quote, i?.min_gpa_quote, i?.ielts_quote, i?.deadline_quote, i?.funding_quote, i?.work_quote, ...array(i?.selection_criteria, 4).map((c) => c?.quote)])
   .filter((x) => typeof x === "string" && x.trim()).length;
 
 export function pickPages(searchResults, limit) {
@@ -341,6 +374,7 @@ const SOURCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 async function runFirecrawl(p, notes, onStep, today, sourceCache) {
   // Only generic keywords go to Firecrawl: no IPK, no achievements, no identity.
+  const target = p.jenjang_tujuan;
   const queries = firecrawlQueries(p, notes, today.slice(0, 4));
   onStep(`Menyusun ${queries.length} kueri Firecrawl Search dari kategori umum (Bahasa Indonesia + Inggris)`);
   const found = await pool(queries, queries.length, (q) => search(q, FC_RESULTS_PER_QUERY));
@@ -359,21 +393,21 @@ async function runFirecrawl(p, notes, onStep, today, sourceCache) {
   let scrapeRequests = 0;
   const cutoff = new Date(Date.now() - SOURCE_MAX_AGE_MS).toISOString();
   const scraped = await pool(pages, FC_CONCURRENCY, async (page) => {
-    const key = normalizeUrl(page.url);
+    // Extraction now selects a degree before the per-page item limit is applied.
+    const key = JSON.stringify(["level-quote", normalizeUrl(page.url), target]);
     const cached = sourceCache?.readSource(key, cutoff);
     if (cached) {
-      onStep(`Memakai ulang ${hostOf(page.url)} → ${cached.length} beasiswa dari pemeriksaan terakhir`);
+      onStep(`Memakai ulang ${hostOf(page.url)} → ${cached.length} beasiswa untuk ${target}`);
       return cached;
     }
     scrapeRequests += 1;
-    const { json, markdown, finalUrl } = await scrapeJson(page.url, FC_SCHEMA, FC_PROMPT);
+    const pageData = await readTargetPage(page.url, target);
+    const { finalUrl, checkedAt, entries } = pageData;
     const host = hostOf(finalUrl);
-    const checkedAt = new Date().toISOString();
-    const entries = toEntries(json, markdown, finalUrl).map((entry) => ({ ...entry, source_checked_at: checkedAt }));
-    if (!entries.length) { onStep(`Membaca ${host} → tidak ada program beasiswa di halaman ini`); return []; }
+    if (!entries.length) { onStep(`Membaca ${host} → tidak ditemukan beasiswa untuk ${target}`); return []; }
     sourceCache?.writeSource(key, checkedAt, entries, cutoff);
     const ok = entries.reduce((n, e) => n + quoteCount(e), 0);
-    quotes += askedQuotes(json);
+    quotes += pageData.quotes;
     verified += ok;
     if (entries.length > 1) {
       onStep(`Membaca ${host} → halaman daftar: ${entries.length} beasiswa (${entries.slice(0, 3).map((e) => e.name).join(", ")}${entries.length > 3 ? ", …" : ""}) · ${ok} kutipan terverifikasi`);
@@ -386,17 +420,18 @@ async function runFirecrawl(p, notes, onStep, today, sourceCache) {
   });
   const failedPages = scraped.filter((r) => r?.error).length;
   if (failedPages) onStep(`${failedPages} halaman gagal dibaca atau ditolak.`);
+  if (pages.length && failedPages === pages.length) throw scraped[0].error;
   const entries = dedupe(scraped.filter((r) => Array.isArray(r)).flat());
   if (scrapeRequests) onStep(`Validasi kutipan baru: ${verified} dari ${quotes} cocok kata per kata dengan teks halaman`);
 
   const { results, expired } = rankScholarships(p, notes, entries, today);
   if (results.length === 0) throw Object.assign(new Error("Tidak ada hasil Firecrawl"), {
-    publicMessage: `Tidak ada program beasiswa yang terbaca dari ${pages.length} halaman. Ubah negara tujuan, lalu coba lagi.`,
+    publicMessage: `Belum ditemukan beasiswa yang mencantumkan jenjang tujuan ${target} dari sumber yang diperiksa. Coba ubah negara tujuan atau cari lagi nanti.`,
   });
 
   const top = results.slice(0, FC_AWARDEE_LOOKUPS);
   onStep(`Mencari cerita & tips awardee untuk ${top.length} beasiswa teratas…`);
-  const refs = await pool(top, FC_CONCURRENCY, (r) => search(`"${r.name.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim()}" awardee pengalaman tips lolos`, FC_AWARDEE_RESULTS + 2));
+  const refs = await pool(top, FC_CONCURRENCY, (r) => search(`"${r.name.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim()}" ${target} awardee pengalaman tips lolos`, FC_AWARDEE_RESULTS + 2));
   top.forEach((r, i) => {
     r.awardee_refs = refs[i]?.error ? [] : refs[i].filter((x) => !isBlocked(x.url) && hostOf(x.url) !== hostOf(r.url)).slice(0, FC_AWARDEE_RESULTS);
   });
