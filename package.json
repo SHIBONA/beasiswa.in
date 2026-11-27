@@ -5,9 +5,9 @@
   "type": "module",
   "description": "beasiswa.in: agen pencari beasiswa (prototipe demo).",
   "scripts": {
-    "start": "node server.mjs",
-    "test": "node --test",
-    "test:browser": "e2e run"
+    "start": "bun server.mjs",
+    "test": "bun test",
+    "test:browser": "bun --bun e2e run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",
