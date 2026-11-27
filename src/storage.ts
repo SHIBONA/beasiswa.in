@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { programIdentity, type Profile, type Scholarship } from "./catalog.ts";
+import type { SearchHit } from "./firecrawl.ts";
 
 // Results and searches are stored as JSON documents; older versions may lack the newer fields.
 export type StoredResult = {
@@ -12,7 +13,7 @@ export type SearchStatus = "queued" | "running" | "succeeded" | "failed";
 export type Search = {
   id: string; created_at: string; day: string; status: SearchStatus; target_level: string; notes: string; mode: string;
   steps: { at: string; text: string }[]; results: StoredResult[]; expired: number; error: string | null;
-  target_countries?: string[]; usage?: Record<string, number> | null; others?: unknown[]; duration_ms?: number;
+  target_countries?: string[]; usage?: Record<string, number> | null; others?: SearchHit[]; duration_ms?: number;
 };
 type Identified = StoredResult & { program_id: string };
 
@@ -87,7 +88,7 @@ function legacyData(path: string) {
 
 // Stored documents are JSON; each column below is typed by the query that selects it.
 type BodyRow = { body: string };
-type HistoryRow = {
+export type HistoryRow = {
   id: string; created_at: string; status: string; notes: string | null; mode: string | null;
   error: string | null; count: number; top: string | null;
 };

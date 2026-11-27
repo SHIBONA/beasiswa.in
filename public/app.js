@@ -1,5 +1,16 @@
 import { publicWebUrl } from "./web-url.mjs";
 
+// API shapes come from the server modules; checked with public/tsconfig.json, no build step.
+/** @typedef {import("../src/catalog.ts").Profile} Profile */
+/** @typedef {import("../src/firecrawl.ts").SearchHit} SearchHit */
+/** @typedef {import("../src/storage.ts").HistoryRow} HistoryRow */
+/** @typedef {import("../src/agent.ts").AgentResult & { id: string; program_id?: string }} Result */
+/** @typedef {Omit<import("../src/storage.ts").Search, "results"> & { results: Result[] }} Search */
+/** @typedef {ReturnType<typeof import("../src/coach.ts").coachFor> & { result_id: string; saved_only: boolean }} Coach */
+/** @typedef {ReturnType<typeof import("../src/coach.ts").previewFor>} Preview */
+/** @typedef {{ mode: string; quota_left: number; daily_quota: number; today: string }} Meta */
+/** @typedef {{ title: string; url: string; note: string }} Link */
+
 const DISCLAIMER = "Hasil dikumpulkan AI dari web dan bisa keliru. Selalu cek syarat & deadline di situs resmi penyelenggara.";
 const POLL_MS = 1200;
 const METHOD_NOTE = `<details class="card method"><summary><b>ℹ️ Cara skor dihitung dan seberapa valid</b></summary><ul>
@@ -8,45 +19,94 @@ const METHOD_NOTE = `<details class="card method"><summary><b>ℹ️ Cara skor d
   <li><b>Batasan:</b> bobot ini rancangan tim beasiswa.in untuk prototipe dan <b>belum divalidasi alumni penerima atau ahli</b>. Skor mengukur kecocokan dengan syarat tertulis, bukan peluang lolos.</li>
   <li><b>Pengalaman awardee</b> adalah artikel publik hasil pencarian, belum diperiksa tim.</li>
 </ul></details>`;
-const app = document.getElementById("app");
-let pollTimer = null;
+/**
+ * @template {HTMLElement} T
+ * @param {string} id
+ * @param {new () => T} type
+ * @returns {T}
+ */
+function byId(id, type) {
+  const el = document.getElementById(id);
+  if (!(el instanceof type)) throw new Error(`Elemen #${id} tidak ditemukan.`);
+  return el;
+}
+
+class ApiError extends Error {
+  /**
+   * @param {string} message
+   * @param {number} status
+   * @param {{ error?: string; fields?: string[]; retry_after?: number }} body
+   */
+  constructor(message, status, body) {
+    super(message);
+    this.status = status;
+    this.body = body;
+  }
+}
+/** @param {unknown} err */
+const errorText = (err) => (err instanceof Error ? err.message : String(err));
+
+const app = byId("app", HTMLElement);
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let pollTimer;
+/** @type {Partial<Meta>} */
 let meta = {};
 
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+/** @type {Record<string, string>} */
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+/** @param {unknown} s */
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+/**
+ * @param {unknown} input
+ * @param {string} label
+ * @param {string} [className]
+ */
 function sourceLink(input, label, className = "") {
   const url = publicWebUrl(input, { keepFragment: true });
   return url
     ? `<a class="${className}" href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">${esc(label)}</a>`
     : `<span class="hint">${esc(label)} (tautan tidak tersedia)</span>`;
 }
+/** @param {string | undefined} d */
 const fmtDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : "Tidak tertulis");
+/** @param {string} iso */
 const fmtTime = (iso) => new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+/** @type {Record<string, string>} */
 const STATUS = { queued: "Antre", running: "Berjalan", succeeded: "Selesai", failed: "Gagal" };
 
+// Responses are JSON from the local server; each caller states the shape it reads.
+/**
+ * @param {string} path
+ * @param {RequestInit} [options]
+ * @returns {Promise<any>}
+ */
 async function api(path, options = {}) {
   const res = await fetch("/api" + path, { headers: { "Content-Type": "application/json" }, ...options });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(body.error || "Terjadi kesalahan."), { status: res.status, body });
+  if (!res.ok) throw new ApiError(body.error || "Terjadi kesalahan.", res.status, body);
   return body;
 }
 
+/** @param {string} text */
 function toast(text) {
-  const t = document.getElementById("toast");
+  const t = byId("toast", HTMLElement);
   t.textContent = text;
   t.classList.add("show");
   setTimeout(() => t.classList.remove("show"), 2000);
 }
 
 async function refreshMeta() {
-  meta = await api("/meta");
+  meta = /** @type {Meta} */ (await api("/meta"));
+  /** @type {Record<string, string>} */
   const MODES = { firecrawl: "Agen: LIVE (Firecrawl web)", live: "Agen AI: LIVE (Claude + web)", demo: "Mode DEMO (data contoh offline)" };
-  document.getElementById("mode").textContent = MODES[meta.mode] ?? MODES.demo;
+  byId("mode", HTMLElement).textContent = MODES[meta.mode ?? ""] ?? MODES.demo;
 }
 
 // ---------- Profil Beasiswa (S1) ----------
 async function viewProfile() {
-  const { profile } = await api("/profile");
+  const { profile } = /** @type {{ profile: Profile | null }} */ (await api("/profile"));
   const p = profile || { jenjang_saat_ini: "S1", jenjang_tujuan: "S2", prodi: "", ipk: "", semester: "", negara_tujuan: "", bidang_minat: "", skor_bahasa: "", prestasi: "", butuh_pendanaan: true };
+  /** @param {string[]} vals @param {string} cur */
   const opt = (vals, cur) => vals.map((v) => `<option ${v === cur ? "selected" : ""}>${v}</option>`).join("");
   app.innerHTML = `
     <h1>Profil Beasiswa</h1>
@@ -80,15 +140,19 @@ async function viewProfile() {
       </div>
       <div id="pferr"></div>
     </form>`;
-  document.getElementById("cvbtn").onclick = () => document.getElementById("cvfile").click();
-  document.getElementById("cvfile").onchange = (e) => e.target.files[0] && uploadCv(e.target.files[0], e.target);
-  document.getElementById("pf").onsubmit = async (e) => {
+  const cvfile = byId("cvfile", HTMLInputElement);
+  byId("cvbtn", HTMLButtonElement).onclick = () => cvfile.click();
+  cvfile.onchange = () => { const file = cvfile.files?.[0]; if (file) uploadCv(file, cvfile); };
+  const form = byId("pf", HTMLFormElement);
+  form.onsubmit = async (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
+    const f = new FormData(form);
+    /** @param {string} name */
+    const text = (name) => String(f.get(name) ?? "").trim();
     const body = {
-      jenjang_saat_ini: f.get("jenjang_saat_ini"), jenjang_tujuan: f.get("jenjang_tujuan"), prodi: f.get("prodi").trim(),
+      jenjang_saat_ini: text("jenjang_saat_ini"), jenjang_tujuan: text("jenjang_tujuan"), prodi: text("prodi"),
       ipk: Number(f.get("ipk")), semester: Number(f.get("semester")), skor_bahasa: Number(f.get("skor_bahasa")),
-      negara_tujuan: f.get("negara_tujuan").trim(), bidang_minat: f.get("bidang_minat").trim(), prestasi: f.get("prestasi").trim(),
+      negara_tujuan: text("negara_tujuan"), bidang_minat: text("bidang_minat"), prestasi: text("prestasi"),
       butuh_pendanaan: f.get("butuh_pendanaan") === "on",
     };
     try {
@@ -96,7 +160,8 @@ async function viewProfile() {
       toast("Profil beasiswa tersimpan");
       location.hash = "#/cari";
     } catch (err) {
-      document.getElementById("pferr").innerHTML = `<div class="error">${esc(err.message)}${err.body?.fields ? ": " + esc(err.body.fields.join(", ")) : ""}</div>`;
+      const fields = err instanceof ApiError ? err.body.fields : undefined;
+      byId("pferr", HTMLElement).innerHTML = `<div class="error">${esc(errorText(err))}${fields ? ": " + esc(fields.join(", ")) : ""}</div>`;
     }
   };
 }
@@ -105,14 +170,21 @@ async function viewProfile() {
 const MAX_CV_BYTES = 5 * 1024 * 1024;
 const MAX_CV_PAGES = 15;
 const MAX_CV_CHARS = 30_000;
+/** @type {Record<string, string>} */
 const FIELD_LABELS = { jenjang_saat_ini: "jenjang", prodi: "prodi", ipk: "IPK", semester: "semester", skor_bahasa: "skor bahasa", bidang_minat: "bidang minat", prestasi: "prestasi" };
 
+// Served by the local server from node_modules; a variable keeps the checker from resolving the URL path.
+const PDF_MODULE = "/pdf/pdf.mjs";
+
+/** @param {File} file */
 async function pdfText(file) {
-  const pdfjs = await import("/pdf/pdf.mjs").catch(() => {
+  /** @type {typeof import("pdfjs-dist")} */
+  const pdfjs = await import(PDF_MODULE).catch(() => {
     throw new Error("Pembaca PDF gagal dimuat. Jalankan npm ci di folder aplikasi.");
   });
   pdfjs.GlobalWorkerOptions.workerSrc = "/pdf/pdf.worker.mjs";
-  const task = pdfjs.getDocument({ data: await file.arrayBuffer(), isEvalSupported: false, useWasm: false, isOffscreenCanvasSupported: false });
+  const task = pdfjs.getDocument({ data: await file.arrayBuffer(), useWasm: false, isOffscreenCanvasSupported: false });
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer;
   try {
     async function readText() {
@@ -122,7 +194,7 @@ async function pdfText(file) {
       for (let i = 1; i <= pdf.numPages; i++) {
         const { items } = await (await pdf.getPage(i)).getTextContent();
         for (const item of items) {
-          if (typeof item.str !== "string") continue;
+          if (!("str" in item) || typeof item.str !== "string") continue;
           if (text.length + item.str.length + 1 > MAX_CV_CHARS) throw new Error("CV terlalu panjang.");
           text += item.str + (item.hasEOL ? "\n" : " ");
         }
@@ -131,6 +203,7 @@ async function pdfText(file) {
       }
       return text;
     }
+    /** @type {Promise<never>} */
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error("Waktu membaca PDF habis.")), 15_000);
     });
@@ -141,26 +214,30 @@ async function pdfText(file) {
   }
 }
 
+/** @param {File} file @param {HTMLInputElement} input */
 async function uploadCv(file, input) {
-  const status = document.getElementById("cvstatus");
+  const status = byId("cvstatus", HTMLElement);
+  /** @param {string} html */
   const show = (html) => (status.innerHTML = html);
   input.value = "";
   if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return show(`<div class="error">File harus PDF.</div>`);
   if (file.size > MAX_CV_BYTES) return show(`<div class="error">CV maksimal 5 MB.</div>`);
-  const button = document.getElementById("cvbtn");
+  const button = byId("cvbtn", HTMLButtonElement);
   button.disabled = true;
   show(`<ul class="steps" style="margin-top:12px"><li class="now">Membaca ${esc(file.name)}…</li></ul>`);
   try {
     const text = await pdfText(file);
     show(`<ul class="steps" style="margin-top:12px"><li>Teks CV terbaca (${text.length} karakter)</li><li class="now">Mengekstrak data akademik…</li></ul>`);
-    const { fields, source } = await api("/cv/parse", { method: "POST", body: JSON.stringify({ text }) });
+    const { fields, source } = /** @type {{ fields: Record<string, string | number>; source: string }} */ (
+      await api("/cv/parse", { method: "POST", body: JSON.stringify({ text }) }));
     if (!input.isConnected) return;
-    const form = input.closest(".cv").nextElementSibling;
+    const form = input.closest(".cv")?.nextElementSibling;
+    if (!(form instanceof HTMLFormElement)) return;
     form.querySelectorAll(".filled").forEach((el) => el.classList.remove("filled"));
     for (const [k, v] of Object.entries(fields)) {
-      const el = form.elements[k];
-      if (!el) continue;
-      el.value = v;
+      const el = form.elements.namedItem(k);
+      if (!(el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement)) continue;
+      el.value = String(v);
       el.classList.add("filled");
     }
     const names = Object.keys(fields).map((k) => FIELD_LABELS[k] ?? k);
@@ -168,7 +245,7 @@ async function uploadCv(file, input) {
       ? `<div class="okbox">✓ ${names.length} kolom terisi dari CV (${source === "ai" ? "dibaca AI" : "pembacaan otomatis"}): ${esc(names.join(", "))}. Kolom berwarna hijau, cek lalu klik <b>Simpan profil</b>. Negara tujuan & jenjang tujuan tetap kamu pilih sendiri.</div>`
       : `<div class="error">Tidak ada data akademik yang terbaca dari CV. Isi manual di bawah.</div>`);
   } catch (err) {
-    show(`<div class="error">${esc(err.message)}</div>`);
+    show(`<div class="error">${esc(errorText(err))}</div>`);
   } finally {
     button.disabled = false;
   }
@@ -176,7 +253,8 @@ async function uploadCv(file, input) {
 
 // ---------- Mulai pencarian (S2, S7) ----------
 async function viewSearch() {
-  const [{ profile }, { searches }] = await Promise.all([api("/profile"), api("/searches"), refreshMeta()]);
+  const [{ profile }, { searches }] = /** @type {[{ profile: Profile | null }, { searches: HistoryRow[] }, void]} */ (
+    await Promise.all([api("/profile"), api("/searches"), refreshMeta()]));
   const recent = searches.slice(0, 3);
   app.innerHTML = `
     <h1>Cari Beasiswa</h1>
@@ -198,28 +276,31 @@ async function viewSearch() {
     <div class="card empty">Isi profil beasiswa dulu supaya agen tahu apa yang cocok untukmu.<br><br><a class="btn" href="#/profil">Upload CV / isi profil</a></div>`}
     ${recent.length ? `<div class="card"><h4 style="margin-bottom:8px">Pencarian terakhir</h4>${historyTable(recent, false)}</div>` : ""}`;
   const go = document.getElementById("go");
-  if (!go) return;
+  if (!(go instanceof HTMLButtonElement)) return;
   go.onclick = async () => {
     go.disabled = true;
     try {
-      const { search_id } = await api("/searches", { method: "POST", body: JSON.stringify({ notes: document.getElementById("notes").value }) });
+      const { search_id } = /** @type {{ search_id: string }} */ (
+        await api("/searches", { method: "POST", body: JSON.stringify({ notes: byId("notes", HTMLInputElement).value }) }));
       location.hash = "#/hasil/" + search_id;
     } catch (err) {
-      const s = err.body?.retry_after;
+      const s = err instanceof ApiError ? err.body.retry_after : undefined;
       const retry = s ? ` Coba lagi dalam ${s > 3600 ? Math.ceil(s / 3600) + " jam" : s + " detik"}.` : "";
-      document.getElementById("err").innerHTML = `<div class="error">${esc(err.message)}${retry}</div>`;
+      byId("err", HTMLElement).innerHTML = `<div class="error">${esc(errorText(err))}${retry}</div>`;
       go.disabled = false;
     }
   };
 }
 
 // ---------- Status live + hasil (S3, S4, S5, S8) ----------
+/** @param {string} id */
 async function viewResult(id) {
+  /** @type {{ search: Search; saved_ids: string[] }} */
   let data;
   try {
     data = await api("/searches/" + encodeURIComponent(id));
   } catch (err) {
-    if (location.hash === "#/hasil/" + id) app.innerHTML = `<div class="card empty">${esc(err.message)}</div>`;
+    if (location.hash === "#/hasil/" + id) app.innerHTML = `<div class="card empty">${esc(errorText(err))}</div>`;
     return;
   }
   if (location.hash !== "#/hasil/" + id) return;
@@ -248,6 +329,7 @@ async function viewResult(id) {
 }
 
 // Eligible programs first; programs with hard limits stay visible below a divider, labelled.
+/** @param {Search} search @param {string[]} savedIds */
 function resultsList(search, savedIds) {
   if (search.mode === "firecrawl" && !Array.isArray(search.target_countries)) {
     return `<div class="card">Pencarian lama ini dibuat sebelum pemeriksaan periode pendaftaran tersedia. <a href="#/cari">Mulai pencarian baru</a> untuk melihat beasiswa yang masih buka.</div>`;
@@ -255,9 +337,11 @@ function resultsList(search, savedIds) {
   if (!search.results.length) {
     return `<div class="card">Belum ada beasiswa yang bisa dipastikan masih buka untuk tujuan ini dari sumber yang diperiksa.</div>`;
   }
+  /** @param {Result} r */
   const limited = (r) => (r.limits ?? []).length > 0;
   const ok = search.results.filter((r) => !limited(r));
   const rest = search.results.filter(limited);
+  /** @param {Result} r */
   const card = (r) => resultCard(r, savedIds.includes(r.id));
   const summary = search.mode === "firecrawl" ? "pendaftaran masih buka" : "sesuai jenjang & deadline";
   return `<p class="sub"><b>${search.results.length} beasiswa</b> · ${search.mode === "firecrawl" ? summary : `${ok.length} ${summary}`} ${rest.length ? `· ${rest.length} dengan catatan` : ""}</p>
@@ -265,6 +349,7 @@ function resultsList(search, savedIds) {
     ${rest.length ? `<div class="divider"><b>Tetap ditampilkan dengan batasan (${rest.length})</b><span class="hint">Periksa batasan pada setiap kartu, termasuk deadline dan sumber informasi.</span></div>${rest.map(card).join("")}` : ""}`;
 }
 
+/** @param {SearchHit[] | undefined} others */
 function othersBlock(others) {
   if (!others?.length) return "";
   return `<details class="card"><summary><b>🔗 Kandidat lain dari pencarian (${others.length})</b> <span class="hint">· belum dibaca agen, tanpa skor</span></summary>
@@ -274,6 +359,7 @@ function othersBlock(others) {
     </li>`).join("")}</ul></details>`;
 }
 
+/** @param {Result} r @param {boolean} saved @param {boolean} [fromBookmarks] */
 function resultCard(r, saved, fromBookmarks = false) {
   const color = r.score >= 75 ? "var(--ok)" : r.score >= 50 ? "var(--brand)" : "var(--warn)";
   const limits = r.limits ?? [];
@@ -312,6 +398,7 @@ function resultCard(r, saved, fromBookmarks = false) {
 }
 
 // Quantitative indicator: points per component, sums to the score.
+/** @param {Result} r */
 function breakdownBlock(r) {
   if (!r.breakdown?.length) return "";
   const rows = r.breakdown.map((b) => {
@@ -333,19 +420,24 @@ function breakdownBlock(r) {
   return `<div class="panel"><h4>📊 Rincian skor (${Number(r.score) || 0}/100) <span class="hint">· klik baris untuk melihat dasar penilaian</span></h4>${rows}</div>`;
 }
 
+/** @param {string} u */
 const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
+/** @param {string} q @param {string} cite */
 const quoteHtml = (q, cite) => `<blockquote>“${esc(q)}”<cite>— ${esc(cite)}</cite></blockquote>`;
+/** @type {Record<string, string>} */
 const SOURCE_NOTES = {
   demo: "Angka syarat: data contoh mode demo. Cek angka resmi di situs penyelenggara.",
   firecrawl: "Angka diekstrak Firecrawl, tetapi kalimat aslinya tidak ditemukan kata per kata di halaman. Cek manual.",
   claude: "Angka dirangkum agen dari hasil pencarian web. Cek di situs resmi.",
 };
+/** @param {Result} r @param {string} key */
 function sourceNote(r, key) {
   if (!["ipk", "bahasa", "pendanaan", "penalti"].includes(key)) return `<div class="hint">Dihitung dari profil beasiswamu dan data program.</div>`;
   return `<div class="hint">${esc(SOURCE_NOTES[r.source] ?? SOURCE_NOTES.demo)}</div>`;
 }
 
 // Why this program fits, per selection stage (older saved results fall back to reasons/gaps).
+/** @param {Result} r */
 function insightBlock(r) {
   if (!r.insight) {
     return `<div class="cols">
@@ -362,6 +454,7 @@ function insightBlock(r) {
   </div>`;
 }
 
+/** @param {Result} r */
 function awardeeBlock(r) {
   if (!r.awardee_refs?.length) return "";
   return `<div class="panel"><h4>🎓 Pengalaman awardee <span class="hint">· artikel publik hasil pencarian, belum diperiksa tim</span></h4>
@@ -371,6 +464,7 @@ function awardeeBlock(r) {
     </li>`).join("")}</ul></div>`;
 }
 
+/** @param {Result} r */
 function achievementsBlock(r) {
   if (!r.achievements?.length) return "";
   const rows = r.achievements.map((a) => `<li class="${a.relevant.length ? "rel" : ""}">
@@ -387,16 +481,16 @@ function achievementsBlock(r) {
 }
 
 function bindStars() {
-  const stars = Array.from(document.querySelectorAll(".star"));
+  const stars = Array.from(document.querySelectorAll(".star")).filter((el) => el instanceof HTMLButtonElement);
   stars.forEach((b) => {
     b.onclick = async () => {
       const saved = b.dataset.saved === "true";
       const related = stars.filter((star) => star.dataset.program === b.dataset.program);
       related.forEach((star) => { star.disabled = true; });
       try {
-        await api("/saved/" + encodeURIComponent(b.dataset.id), { method: saved ? "DELETE" : "PUT" });
+        await api("/saved/" + encodeURIComponent(b.dataset.id ?? ""), { method: saved ? "DELETE" : "PUT" });
       } catch (err) {
-        toast(err.message);
+        toast(errorText(err));
         return;
       } finally {
         related.forEach((star) => { star.disabled = false; });
@@ -413,9 +507,12 @@ function bindStars() {
 }
 
 // ---------- Sesuaikan CV: rewording options re-scored before/after, hard gaps, growth plan ----------
+/** @param {Link} l */
 const linkHtml = (l) => `<li>${l.url ? sourceLink(l.url, `${l.title} ↗`) : `<b>${esc(l.title)}</b>`} <span class="hint">${esc(l.note)}</span></li>`;
+/** @param {number} d */
 const deltaHtml = (d) => (d > 0 ? `<span class="up">+${d}</span>` : d < 0 ? `<span class="down">${d}</span>` : `<span class="hint">0</span>`);
 
+/** @param {Preview} p */
 function compareHtml(p) {
   const rows = p.rows.map((r) => `<tr class="${r.after !== r.before ? "changed" : ""}">
     <td>${esc(r.label)}</td><td>${r.before}${r.max ? `/${r.max}` : ""}</td><td>${r.after}${r.max ? `/${r.max}` : ""}</td><td>${deltaHtml(r.after - r.before)}</td>
@@ -427,6 +524,7 @@ function compareHtml(p) {
     <div class="table-wrap"><table><thead><tr><th>Komponen</th><th>Sebelum</th><th>Sesudah</th><th>Δ</th><th>Alasan perubahan</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+/** @param {Coach["cv_edits"][number]} e */
 function editBlock(e) {
   return `<div class="edit" data-index="${e.index}">
     <div class="hint">Kalimat sekarang · tingkat ${esc(e.level.toLowerCase())} · kategori ${esc(e.tags.join(", ") || "belum terbaca")}</div>
@@ -439,13 +537,17 @@ function editBlock(e) {
   </div>`;
 }
 
+/** @param {string} id @param {boolean} [fromBookmarks] */
 async function viewCoach(id, fromBookmarks = false) {
   const rid = decodeURIComponent(id);
-  let c, profile;
+  /** @type {Coach} */
+  let c;
+  /** @type {Profile} */
+  let profile;
   try {
     [c, { profile }] = await Promise.all([api("/coach/" + encodeURIComponent(rid)), api("/profile")]);
   } catch (err) {
-    app.innerHTML = `<div class="card error">${esc(err.message)} <a href="#/cari">Kembali</a></div>`;
+    app.innerHTML = `<div class="card error">${esc(errorText(err))} <a href="#/cari">Kembali</a></div>`;
     return;
   }
   const items = String(profile.prestasi ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
@@ -492,21 +594,28 @@ async function viewCoach(id, fromBookmarks = false) {
   const patch = () => {
     const chosen = items.map((text, i) => {
       const box = app.querySelector(`.edit[data-index="${i}"]`);
-      const pick = box?.querySelector("input[type=radio]:checked")?.value;
-      return pick ? box.querySelector(`.opttext[data-k="${pick}"]`).value.trim() || text : text;
+      const radio = box?.querySelector("input[type=radio]:checked");
+      const pick = radio instanceof HTMLInputElement ? radio.value : "";
+      const option = pick ? box?.querySelector(`.opttext[data-k="${pick}"]`) : null;
+      return option instanceof HTMLInputElement ? option.value.trim() || text : text;
     });
+    /** @type {Record<string, string>} */
     const out = { prestasi: chosen.join("; ") };
-    app.querySelectorAll(".pe:checked").forEach((el) => { const e = c.profile_edits[el.dataset.k]; out[e.field] = e.value; });
+    app.querySelectorAll(".pe:checked").forEach((el) => {
+      const e = el instanceof HTMLInputElement ? c.profile_edits[Number(el.dataset.k)] : undefined;
+      if (e) out[e.field] = e.value;
+    });
     return out;
   };
-  const truth = document.getElementById("truth");
-  const apply = document.getElementById("apply");
+  const truth = byId("truth", HTMLInputElement);
+  const apply = byId("apply", HTMLButtonElement);
   truth.onchange = () => (apply.disabled = !truth.checked);
-  document.getElementById("preview").onclick = async () => {
+  const previewOut = byId("previewOut", HTMLElement);
+  byId("preview", HTMLButtonElement).onclick = async () => {
     try {
-      document.getElementById("previewOut").innerHTML = compareHtml(await api(`/coach/${encodeURIComponent(rid)}/preview`, { method: "POST", body: JSON.stringify(patch()) }));
+      previewOut.innerHTML = compareHtml(await api(`/coach/${encodeURIComponent(rid)}/preview`, { method: "POST", body: JSON.stringify(patch()) }));
     } catch (err) {
-      document.getElementById("previewOut").innerHTML = `<div class="error">${esc(err.message)}</div>`;
+      previewOut.innerHTML = `<div class="error">${esc(errorText(err))}</div>`;
     }
   };
   apply.onclick = async () => {
@@ -515,10 +624,10 @@ async function viewCoach(id, fromBookmarks = false) {
       toast("Profil diperbarui. Skor baru dipakai di pencarian berikutnya.");
       viewCoach(id, fromBookmarks);
     } catch (err) {
-      toast(err.message);
+      toast(errorText(err));
     }
   };
-  document.getElementById("copy").onclick = async () => {
+  byId("copy", HTMLButtonElement).onclick = async () => {
     try {
       await navigator.clipboard.writeText(patch().prestasi.split("; ").join("\n"));
       toast("Teks prestasi disalin");
@@ -529,6 +638,7 @@ async function viewCoach(id, fromBookmarks = false) {
 }
 
 // ---------- Riwayat (S6) ----------
+/** @param {HistoryRow[]} searches @param {boolean} deletable */
 function historyTable(searches, deletable) {
   return `<div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Catatan</th><th>Status</th><th>Hasil</th><th></th></tr></thead><tbody>
     ${searches.map((s) => `<tr>
@@ -540,15 +650,15 @@ function historyTable(searches, deletable) {
 }
 
 async function viewHistory() {
-  const { searches } = await api("/searches");
+  const { searches } = /** @type {{ searches: HistoryRow[] }} */ (await api("/searches"));
   app.innerHTML = `<h1>Riwayat Pencarian</h1><p class="sub">Urut terbaru. Kamu bisa menghapus riwayat kapan saja.</p>
     <div class="card">${searches.length ? historyTable(searches, true) : `<div class="empty">Belum ada pencarian.</div>`}</div>`;
-  document.querySelectorAll(".del").forEach((b) => (b.onclick = async () => {
+  document.querySelectorAll(".del").forEach((b) => b instanceof HTMLButtonElement && (b.onclick = async () => {
     try {
       await api("/searches/" + b.dataset.id, { method: "DELETE" });
       toast("Riwayat dihapus");
     } catch (err) {
-      toast(err.message);
+      toast(errorText(err));
     }
     viewHistory();
   }));
@@ -556,7 +666,7 @@ async function viewHistory() {
 
 // ---------- Tersimpan (S5) ----------
 async function viewSaved() {
-  const { saved } = await api("/saved");
+  const { saved } = /** @type {{ saved: Result[] }} */ (await api("/saved"));
   app.innerHTML = `<h1>Beasiswa Tersimpan</h1><p class="sub">Beasiswa yang kamu tandai untuk dipersiapkan.</p>
     ${saved.length ? `<div class="disclaimer">⚠️ ${DISCLAIMER}</div>` + saved.map((r) => resultCard(r, true, true)).join("") : `<div class="card empty">Belum ada beasiswa tersimpan.</div>`}`;
   bindStars();
@@ -568,7 +678,7 @@ async function route() {
   const [, page, id, from] = location.hash.split("/");
   const fromBookmarks = from === "tersimpan";
   const nav = page === "hasil" || page === "sesuaikan" ? (fromBookmarks ? "tersimpan" : "cari") : page || "cari";
-  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a.dataset.nav === nav));
+  document.querySelectorAll("[data-nav]").forEach((a) => a.classList.toggle("active", a instanceof HTMLElement && a.dataset.nav === nav));
   try {
     if (page === "profil") await viewProfile();
     else if (page === "hasil" && id) await viewResult(id);
@@ -577,8 +687,8 @@ async function route() {
     else if (page === "tersimpan") await viewSaved();
     else await viewSearch();
   } catch (err) {
-    app.innerHTML = `<div class="card error">${esc(err.message)}</div>`;
+    app.innerHTML = `<div class="card error">${esc(errorText(err))}</div>`;
   }
 }
 window.addEventListener("hashchange", route);
-refreshMeta().then(route).catch((err) => (app.innerHTML = `<div class="card error">Server tidak bisa dihubungi: ${esc(err.message)}</div>`));
+refreshMeta().then(route).catch((err) => (app.innerHTML = `<div class="card error">Server tidak bisa dihubungi: ${esc(errorText(err))}</div>`));

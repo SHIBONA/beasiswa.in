@@ -33,7 +33,7 @@ type SourceCache = Pick<ReturnType<typeof openStore>, "readSource" | "writeSourc
 // Entries read by Firecrawl always carry their quotes.
 type WebScholarship = Scholarship & { evidence: Evidence };
 export type AgentResult = RankedResult & { awardee_refs?: SearchHit[] };
-type SearchOutcome = { results: AgentResult[]; expired: number; usage: Record<string, number> | null; others?: unknown[] };
+type SearchOutcome = { results: AgentResult[]; expired: number; usage: Record<string, number> | null; others?: SearchHit[] };
 
 export async function runSearch(profile: Profile, notes: string, onStep: Step, today: string, sourceCache?: SourceCache): Promise<SearchOutcome> {
   const mode = agentMode();
