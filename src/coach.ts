@@ -3,7 +3,14 @@
 // 2) what rewording cannot change (official numeric gates) and why,
 // 3) what to build next (courses, certifications, experience) with links.
 // Options never add facts: each carries a condition the member must confirm is true.
-import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements } from "./catalog.mjs";
+import { VALUE_LABELS, classifyAchievement, scoreScholarship, splitAchievements, type BreakdownRow } from "./catalog.ts";
+
+type Link = { title: string; url: string; note: string };
+type CvOption = { text: string; why: string; condition: string; after: number; delta: number };
+type CvEdit = { index: number; original: string; level: string; tags: string[]; options: CvOption[] };
+type ProfileEdit = { field: string; value: string; label: string; condition: string; after: number; delta: number };
+type HardGap = { title: string; detail: string; quote: string; potential: number; why: string; actions: Link[] };
+type GrowthStep = { area: string; why: string; quote: string; links: Link[] };
 
 const MAX_OPTIONS = 3;
 const PRESTASI_WEAK = 12;
@@ -66,7 +73,7 @@ function cvEditsFor(profile, notes, program, base) {
   const items = splitAchievements(profile.prestasi);
   const values = program.values ?? [];
   const rescore = (prestasi) => scoreScholarship({ ...profile, prestasi }, notes, program).score;
-  const edits = [];
+  const edits: CvEdit[] = [];
   items.forEach((text, i) => {
     const a = classifyAchievement(text);
     const candidates = [
@@ -96,7 +103,7 @@ function cvEditsFor(profile, notes, program, base) {
 
 function profileEditsFor(profile, notes, program, base) {
   const rescore = (patch) => scoreScholarship({ ...profile, ...patch }, notes, program).score;
-  const edits = [];
+  const edits: ProfileEdit[] = [];
   const bidang = row(base, "bidang");
   if (bidang && bidang.points < bidang.max && !program.fields.includes("semua")) {
     for (const f of program.fields.slice(0, 3)) {
@@ -116,7 +123,7 @@ function profileEditsFor(profile, notes, program, base) {
 }
 
 function hardGapsFor(profile, notes, program, base) {
-  const gaps = [];
+  const gaps: HardGap[] = [];
   const potential = (patchProfile, patchProgram = {}) => scoreScholarship({ ...profile, ...patchProfile }, notes, { ...program, ...patchProgram }).score - base.score;
   const ipk = row(base, "ipk");
   if (program.min_gpa && ipk?.points === 0) {
@@ -155,7 +162,7 @@ function growthFor(profile, program, base) {
   const prestasi = row(base, "prestasi");
   const values = program.values ?? [];
   const criteria = program.evidence?.kriteria ?? [];
-  const plan = [];
+  const plan: GrowthStep[] = [];
   if (prestasi && prestasi.points < PRESTASI_WEAK) {
     for (const v of values) {
       const quote = criteria.find((c) => new RegExp(v.slice(0, 5), "i").test(`${c.text} ${c.quote}`))?.quote ?? "";
@@ -194,11 +201,14 @@ export function coachFor(profile, notes, program) {
 export function previewFor(profile, notes, program, patch) {
   const before = scoreScholarship(profile, notes, program);
   const after = scoreScholarship({ ...profile, ...patch }, notes, program);
-  const keys = [...new Set([...before.breakdown, ...after.breakdown].map((b) => b.key))];
+  // One reference row per component, in first-seen order; the "after" row wins when both have it.
+  const refs = new Map<string, BreakdownRow>();
+  for (const b of [...before.breakdown, ...after.breakdown]) {
+    if (!refs.has(b.key)) refs.set(b.key, after.breakdown.find((x) => x.key === b.key) ?? b);
+  }
   const sum = (fit, key) => fit.breakdown.filter((b) => b.key === key).reduce((s, b) => s + b.points, 0);
-  const rows = keys.map((key) => {
-    const ref = after.breakdown.find((b) => b.key === key) ?? before.breakdown.find((b) => b.key === key);
-    return { key, label: ref.label, max: ref.max, before: sum(before, key), after: sum(after, key), detail: after.breakdown.find((b) => b.key === key)?.detail ?? "" };
-  });
+  const rows = [...refs].map(([key, ref]) => (
+    { key, label: ref.label, max: ref.max, before: sum(before, key), after: sum(after, key), detail: after.breakdown.find((b) => b.key === key)?.detail ?? "" }
+  ));
   return { before: before.score, after: after.score, rows };
 }

@@ -5,8 +5,9 @@
   "type": "module",
   "description": "beasiswa.in: agen pencari beasiswa (prototipe demo).",
   "scripts": {
-    "start": "bun server.mjs",
+    "start": "bun src/server.ts",
     "test": "bun test",
+    "typecheck": "tsc -p .",
     "test:browser": "bun --bun e2e run"
   },
   "dependencies": {
@@ -16,7 +17,9 @@
   "devDependencies": {
     "@e2e-dev/core": "0.25.0",
     "@e2e-dev/web": "0.17.0",
+    "@types/bun": "1.4.5",
     "e2e": "0.25.0",
-    "playwright-core": "1.65.1"
+    "playwright-core": "1.65.1",
+    "typescript": "7.0.2"
   }
 }

@@ -4,17 +4,17 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.mjs";
-import { MAX_CV_CHARS, parseCv } from "./cv.mjs";
-import { coachFor, previewFor } from "./coach.mjs";
-import { openStore } from "./storage.mjs";
+import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.ts";
+import { MAX_CV_CHARS, parseCv } from "./cv.ts";
+import { coachFor, previewFor } from "./coach.ts";
+import { openStore } from "./storage.ts";
 
-const ROOT = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // API keys (FIRECRAWL_API_KEY / ANTHROPIC_API_KEY) live in .env, never in source.
 try {
   process.loadEnvFile(join(ROOT, ".env"));
 } catch (error) {
-  if (error.code !== "ENOENT") throw error;
+  if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 }
 const LEGACY_PATH = process.env.DATA_FILE || join(ROOT, "data.json");
 const DATABASE_PATH = process.env.DATABASE_FILE || (process.env.DATA_FILE ? `${LEGACY_PATH}.sqlite` : join(ROOT, "data.sqlite"));
@@ -47,7 +47,10 @@ const today = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Jak
 const applicationDay = ({ target_countries }) => target_countries?.length === 1 && target_countries[0] === "jepang"
   ? new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Tokyo" }) : today();
 
-let store;
+// Errors thrown with a client-safe message (publicMessage) or an HTTP status for the response.
+type PublicError = Error & { status?: number; publicMessage?: string };
+
+let store: ReturnType<typeof openStore>;
 let activeSearch;
 
 const PROFILE_FIELDS = {
@@ -101,7 +104,8 @@ async function startSearch(search, profile) {
     store.transaction(() => store.saveSearch({
       ...search, status: "succeeded", results: ranked, expired, usage, others, duration_ms: Date.now() - started,
     }));
-  } catch (error) {
+  } catch (caught) {
+    const error = caught as PublicError;
     console.error(`Pencarian ${search.id} gagal (${error.name}).`);
     try {
       store.saveSearch({
@@ -124,7 +128,7 @@ async function readJson(req, limit = MAX_BODY_BYTES) {
     throw Object.assign(new Error("Body terlalu besar"), { status: 413 });
   }
   let size = 0;
-  const chunks = [];
+  const chunks: Buffer[] = [];
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
     if (size > limit) throw Object.assign(new Error("Body terlalu besar"), { status: 413 });
@@ -183,7 +187,7 @@ async function api(req, res, path) {
       if (typeof notes !== "string" || notes.length > 300) return send(res, 422, { error: "Catatan maksimal 300 karakter." });
       const day = today();
       const mode = agentMode();
-      const search = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
+      const search: Record<string, any> = { id: randomUUID(), created_at: new Date().toISOString(), day, status: "running", target_level: profile.jenjang_tujuan, notes: notes.trim(), mode, steps: [], results: [], expired: 0, error: null };
       if (mode === "firecrawl") search.target_countries = firecrawlDestinations(profile, notes);
       const blocked = store.transaction(() => {
         const quota = checkQuota(store.quotaSearches(day), day, new Date(), store.count("deleted", day));
@@ -232,7 +236,7 @@ async function api(req, res, path) {
     if (method === "POST" && action === "preview") {
       const body = await readJson(req);
       const patch = {};
-      for (const [key, max] of [["prestasi", 500], ["bidang_minat", 200], ["negara_tujuan", 200]]) {
+      for (const [key, max] of [["prestasi", 500], ["bidang_minat", 200], ["negara_tujuan", 200]] as const) {
         if (body[key] === undefined) continue;
         if (typeof body[key] !== "string" || body[key].length > max) return send(res, 422, { error: `${key} maksimal ${max} karakter.` });
         patch[key] = body[key];
@@ -279,7 +283,7 @@ async function serveStatic(req, res, path) {
     res.writeHead(200, { "Content-Type": type, "Content-Length": body.length, "Cache-Control": "no-cache" });
     res.end(req.method === "HEAD" ? undefined : body);
   } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     send(res, 404, { error: "Berkas tidak ditemukan." });
   }
 }
@@ -288,13 +292,14 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
   for (const [header, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(header, value);
   const host = req.headers.host;
   const port = req.socket.localPort;
-  if (![ `localhost:${port}`, `127.0.0.1:${port}` ].includes(host)) {
+  if (!host || ![`localhost:${port}`, `127.0.0.1:${port}`].includes(host)) {
     return send(res, 403, { error: "Buka aplikasi dari alamat lokal." }, { Connection: "close" });
   }
-  if (!req.url.startsWith("/") || req.url.startsWith("//") || req.url.includes("\\")) {
+  const url = req.url ?? "";
+  if (!url.startsWith("/") || url.startsWith("//") || url.includes("\\")) {
     return send(res, 400, { error: "Alamat tidak valid." }, { Connection: "close" });
   }
-  const path = req.url.split("?")[0];
+  const path = url.split("?")[0];
   try {
     if (path.startsWith("/api/")) {
       const { origin, "sec-fetch-site": site } = req.headers;
@@ -304,7 +309,8 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
       return await api(req, res, path);
     }
     return await serveStatic(req, res, path);
-  } catch (error) {
+  } catch (caught) {
+    const error = caught as PublicError;
     if (!error.status) console.error(`Permintaan gagal (${error.name}).`);
     send(res, error.status ?? 500, { error: error.status ? error.message : "Terjadi kesalahan server." }, { Connection: "close" });
   }

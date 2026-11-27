@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyAchievement, matchCatalog, rankScholarships } from "./catalog.mjs";
-import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "./agent.mjs";
-import { checkQuota, validateProfile } from "./server.mjs";
-import { extractCvHeuristic, redact } from "./cv.mjs";
-import { pickPages, toEntries } from "./agent.mjs";
-import { isOfficial, publicWebUrl, verifyQuote } from "./firecrawl.mjs";
-import { coachFor, previewFor } from "./coach.mjs";
-import { CATALOG } from "./catalog.mjs";
-import { openStore } from "./storage.mjs";
+import { classifyAchievement, matchCatalog, rankScholarships } from "../src/catalog.ts";
+import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
+import { checkQuota, validateProfile } from "../src/server.ts";
+import { extractCvHeuristic, redact } from "../src/cv.ts";
+import { pickPages, toEntries } from "../src/agent.ts";
+import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
+import { coachFor, previewFor } from "../src/coach.ts";
+import { CATALOG } from "../src/catalog.ts";
+import { openStore } from "../src/storage.ts";
 
 const PAGE = `# Beasiswa Reguler
 | Persyaratan | Pendaftar jenjang **Magister** wajib memiliki IPK sekurang-kurangnya 3,00 pada skala 4,00 |
@@ -75,8 +75,8 @@ test("provider URLs use public host names and official labels match domain bound
   assert.equal(isOfficial("https://scholarships.manchester.ac.uk/application"), true);
   assert.equal(isOfficial("https://lpdp.kemenkeu.go.id.example.com/application"), false);
   assert.equal(isOfficial("https://chevening-information.example.com/application"), false);
-  assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details").href, "https://example.com/Scholarships?id=1");
-  assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details", { keepFragment: true }).href, "https://example.com/Scholarships?id=1#details");
+  assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details")?.href, "https://example.com/Scholarships?id=1");
+  assert.equal(publicWebUrl("https://example.com/Scholarships?id=1#details", { keepFragment: true })?.href, "https://example.com/Scholarships?id=1#details");
 });
 
 test("malformed provider items are skipped or reduced to bounded facts", () => {
@@ -102,7 +102,7 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
     if (providerKey === undefined) delete process.env.FIRECRAWL_API_KEY;
     else process.env.FIRECRAWL_API_KEY = providerKey;
   });
-  const requests = [];
+  const requests: { path: string; body: any }[] = [];
   const programUrl = "https://lpdp.kemenkeu.go.id/program";
   const quote = "Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00";
   t.mock.method(globalThis, "fetch", async (input, options) => {
@@ -171,14 +171,14 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   cache.close();
   cache = openStore(path, legacy);
   const repeated = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
-  assert.equal(repeated.usage.firecrawl_pages, 0);
+  assert.equal(repeated.usage?.firecrawl_pages, 0);
   assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2"]);
   assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
   assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
   const empty = await runSearch(targetProfile, notes, () => {}, "2026-11-27", cache);
   assert.deepEqual(empty.results, []);
-  assert.equal(empty.usage.firecrawl_pages, 0);
-  assert.equal(empty.usage.firecrawl_searches, 5);
+  assert.equal(empty.usage?.firecrawl_pages, 0);
+  assert.equal(empty.usage?.firecrawl_searches, 5);
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
 });
 
@@ -209,8 +209,8 @@ test("CV heuristic fills academic fields", () => {
   assert.equal(f.prodi, "Teknik Elektro");
   assert.equal(f.semester, 7);
   assert.equal(f.jenjang_saat_ini, "S1");
-  assert.match(f.prestasi, /Juara 2.*; Finalis IEEEXtreme/);
-  assert.match(f.bidang_minat, /IoT/);
+  assert.match(f.prestasi ?? "", /Juara 2.*; Finalis IEEEXtreme/);
+  assert.match(f.bidang_minat ?? "", /IoT/);
 });
 
 test("CV semester falls back to intake year", () => {
@@ -304,10 +304,10 @@ test("achievements score by level, relevance and rank", () => {
 
 test("quota: 1 running at a time, 5 per day, failed searches free", () => {
   const day = "2026-11-26";
-  assert.equal(checkQuota([{ status: "running", day }], day).retry_after, 15);
+  assert.equal(checkQuota([{ status: "running", day }], day)?.retry_after, 15);
   const five = Array.from({ length: 5 }, () => ({ status: "succeeded", day }));
   const blocked = checkQuota(five, day, new Date("2026-11-26T23:00:00+07:00"));
-  assert.equal(blocked.retry_after, 3600);
+  assert.equal(blocked?.retry_after, 3600);
   assert.equal(checkQuota([...five.slice(0, 4), { status: "failed", day }], day), null);
   assert.equal(checkQuota(five.map((s) => ({ ...s, day: "2026-11-25" })), day), null);
 });
@@ -333,7 +333,8 @@ test("coach: rewording options are re-scored and the best one raises the score",
   items[top.index] = top.options[0].text;
   const p = previewFor(me, "", LPDP, { prestasi: items.join("; ") });
   assert.equal(p.after, top.options[0].after);
-  assert.ok(p.rows.find((r) => r.key === "prestasi").after > p.rows.find((r) => r.key === "prestasi").before);
+  const prestasi = p.rows.find((r) => r.key === "prestasi");
+  assert.ok(prestasi && prestasi.after > prestasi.before);
 });
 
 test("coach: numeric gates are hard gaps with a reason, potential and growth links", () => {
@@ -341,7 +342,7 @@ test("coach: numeric gates are hard gaps with a reason, potential and growth lin
   const titles = c.hard_gaps.map((g) => g.title);
   assert.ok(titles.some((t) => t.startsWith("IPK di bawah")) && titles.some((t) => t.startsWith("Skor bahasa")));
   const lang = c.hard_gaps.find((g) => g.title.startsWith("Skor bahasa"));
-  assert.ok(lang.potential > 0 && /sertifikat/.test(lang.why) && lang.actions.every((a) => !a.url || a.url.startsWith("https://")));
+  assert.ok(lang && lang.potential > 0 && /sertifikat/.test(lang.why) && lang.actions.every((a) => !a.url || a.url.startsWith("https://")));
 });
 
 test("coach: says honestly when wording cannot help", () => {

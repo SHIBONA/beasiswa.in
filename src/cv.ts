@@ -17,7 +17,7 @@ export function redact(text) {
 const toNumber = (s) => Number(String(s).replace(",", "."));
 
 export function extractCvHeuristic(text, today) {
-  const fields = {};
+  const fields: { ipk?: number; skor_bahasa?: number; prodi?: string; jenjang_saat_ini?: string; semester?: number; prestasi?: string; bidang_minat?: string } = {};
   const flat = text.replace(/\s+/g, " ");
 
   const gpa = flat.match(/\b(?:IPK|GPA|Indeks Prestasi Kumulatif)\b\s*[:=]?\s*([0-4][.,]\d{1,2})/i);

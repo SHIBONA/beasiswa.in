@@ -94,6 +94,8 @@ export function opensLevel(levels, targetLevel) {
   return levels.some((level) => target === "exchange" ? norm(level).startsWith("exchange") : norm(level) === target);
 }
 
+export type BreakdownRow = { key: string; label: string; points: number; max: number; detail: string; rule: string; quote: string };
+
 export function scoreScholarship(profile, notes, s) {
   const levelOk = opensLevel(s.levels, profile.jenjang_tujuan);
 
@@ -106,9 +108,9 @@ export function scoreScholarship(profile, notes, s) {
   const fields = list(profile.bidang_minat).concat(list(profile.prodi));
   const values = s.values ?? [];
   const ev = s.evidence ?? {};
-  const breakdown = [];
-  const reasons = levelOk ? [`Membuka jenjang ${s.levels.join("/")}, sesuai tujuanmu ${profile.jenjang_tujuan}`] : [];
-  const gaps = [];
+  const breakdown: BreakdownRow[] = [];
+  const reasons: string[] = levelOk ? [`Membuka jenjang ${s.levels.join("/")}, sesuai tujuanmu ${profile.jenjang_tujuan}`] : [];
+  const gaps: string[] = [];
   // rule = how the points are computed; quote = sentence verified on the official page (Firecrawl mode).
   const add = (key, label, points, detail, good, rule, quote = "") => {
     breakdown.push({ key, label, points, max: WEIGHTS[key] ?? 0, detail, rule, quote });
@@ -162,7 +164,8 @@ export function scoreScholarship(profile, notes, s) {
   else if (s.funding === "Sebagian") add("pendanaan", "Pendanaan", 4, "Hanya pendanaan sebagian, kamu butuh penuh", false, fundRule, ev.pendanaan);
   else add("pendanaan", "Pendanaan", 5, "Cakupan dana tidak tertulis di halaman, cek langsung", false, fundRule);
 
-  const penalties = [];
+  // [points, detail, rule, quote]
+  const penalties: [number, string, string, string][] = [];
   if (!levelOk) penalties.push([30, s.levels.length ? `Tidak membuka jenjang ${profile.jenjang_tujuan} (hanya ${s.levels.join("/")})` : "Jenjang program tidak tertulis di halaman", "Jenjang adalah syarat mutlak; program untuk jenjang lain tetap ditampilkan sebagai referensi.", ""]);
   if (s.min_sem && (semester < s.min_sem || semester > s.max_sem)) penalties.push([15, `Khusus semester ${s.min_sem === s.max_sem ? s.min_sem : `${s.min_sem}–${s.max_sem}`} (kamu semester ${semester || "?"})`, "Batas semester adalah syarat mutlak; di luar rentang berkas tidak diproses.", ""]);
   if (s.work_years) penalties.push([10, `Butuh pengalaman kerja min ${s.work_years} tahun`, "Pengalaman kerja tidak tercatat di profil mahasiswa, jadi dianggap belum terpenuhi.", ev.kerja ?? ""]);
@@ -206,7 +209,7 @@ const LOCAL_ONLY = /local students only|for local students|permanent (citizens?|
 
 // Hard limits do not hide a program; they label it and push it below the eligible ones.
 export function limitsOf(s, profile, today) {
-  const limits = [];
+  const limits: string[] = [];
   if (!s.levels.length) limits.push("Jenjang tidak tertulis");
   else if (!opensLevel(s.levels, profile.jenjang_tujuan)) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
   if (isExpired(s.deadline, today)) limits.push("Deadline periode ini lewat, pantau periode berikutnya");
@@ -228,7 +231,7 @@ export function rankScholarships(profile, notes, scholarships, today) {
     program: s, // raw facts, so the CV coach can re-score "what if" profiles later
   }));
   const expired = scholarships.filter((s) => isExpired(s.deadline, today)).length;
-  results.sort((a, b) => (a.limits.length > 0) - (b.limits.length > 0) || b.score - a.score);
+  results.sort((a, b) => Number(a.limits.length > 0) - Number(b.limits.length > 0) || b.score - a.score);
   return { results: results.slice(0, MAX_RESULTS), expired, eligible: results.filter((r) => !r.limits.length).length };
 }
 

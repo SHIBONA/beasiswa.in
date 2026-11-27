@@ -1,9 +1,10 @@
-// Scholarship search agent. Three modes, all ranked by the same transparent scorer in catalog.mjs:
+// Scholarship search agent. Three modes, all ranked by the same transparent scorer in catalog.ts:
 // firecrawl (FIRECRAWL_API_KEY): Firecrawl search + scrape + JSON extraction with verified quotes.
 // live (ANTHROPIC_API_KEY): Claude + web_search/web_fetch.
-// demo (no key): scripted steps over catalog.mjs so the flow can be recorded offline.
-import { CATALOG, WEIGHTS, discoveryCountries, opensLevel, programIdentity, rankScholarships } from "./catalog.mjs";
-import { hostOf, isBlocked, isOfficial, pool, publicWebUrl, scrapeJson, search, verifyQuote } from "./firecrawl.mjs";
+// demo (no key): scripted steps over catalog.ts so the flow can be recorded offline.
+import type { BetaContentBlock, BetaMessageParam } from "@anthropic-ai/sdk/resources/beta/messages";
+import { CATALOG, WEIGHTS, discoveryCountries, opensLevel, programIdentity, rankScholarships } from "./catalog.ts";
+import { hostOf, isBlocked, isOfficial, pool, publicWebUrl, scrapeJson, search, verifyQuote } from "./firecrawl.ts";
 
 const MODEL = "claude-opus-5-5";
 const MAX_PAUSE_RESUMES = 6;
@@ -26,7 +27,9 @@ export function searchProfile(p) {
   return Object.fromEntries(keys.map((k) => [k, p[k]]));
 }
 
-export async function runSearch(profile, notes, onStep, today, sourceCache) {
+type SearchOutcome = { results: any[]; expired: number; usage: Record<string, number> | null; others?: any[] };
+
+export async function runSearch(profile, notes, onStep, today, sourceCache): Promise<SearchOutcome> {
   const mode = agentMode();
   if (mode === "demo" && /^simulasi gagal$/i.test(notes)) {
     onStep("Mencari di web…");
@@ -105,9 +108,8 @@ async function runDemo(p, notes, onStep, today) {
   await sleep(STEP_MS);
 
   const { results, expired } = rankScholarships(p, notes, CATALOG, today);
-  const byName = new Map(CATALOG.map((s) => [s.name, s]));
   for (const r of results.slice(0, SHOWN_OPENS)) {
-    const s = byName.get(r.name);
+    const s = r.program;
     const reqs = [s.min_gpa && `IPK ≥ ${fmtGpa(s.min_gpa)}`, s.ielts && `IELTS ≥ ${s.ielts}`, s.work_years && `kerja ${s.work_years} th`, `deadline ${fmtDate(s.deadline)}`].filter(Boolean).join(" · ");
     onStep(`Membuka ${new URL(s.url).hostname} → ${s.name}: ${reqs}`);
     await sleep(OPEN_MS);
@@ -204,8 +206,8 @@ export function validateResults(raw, seenUrls) {
 async function runLive(profile, notes, onStep, today) {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
   const client = new Anthropic({ timeout: 75_000, maxRetries: 0 });
-  const messages = [{ role: "user", content: buildPrompt(discoveryPreferences(profile, notes), today) }];
-  const allContent = [];
+  const messages: BetaMessageParam[] = [{ role: "user", content: buildPrompt(discoveryPreferences(profile, notes), today) }];
+  const allContent: BetaContentBlock[] = [];
   const usage = { input_tokens: 0, output_tokens: 0, web_search_requests: 0 };
   onStep("Agen Claude mulai menelusuri web");
 
@@ -323,7 +325,7 @@ function readDateInQuote(value, quote) {
   const [year, month, day] = value.split("-");
   const text = quote.normalize("NFKC").toLowerCase().replace(/[*_]/g, "").replace(/\s+/g, " ");
   const date = new Date(value);
-  const monthNames = ["id", "en"].flatMap((locale) => ["long", "short"].map((format) =>
+  const monthNames = ["id", "en"].flatMap((locale) => (["long", "short"] as const).map((format) =>
     new Intl.DateTimeFormat(locale, { month: format, timeZone: "UTC" }).format(date).toLowerCase()));
   if (month === "08") monthNames.push("agu", "agt");
   if (month === "09") monthNames.push("sep", "sept");
@@ -394,7 +396,7 @@ function toEntry(item, markdown, url, official) {
 export function toEntries(json, markdown, url) {
   if (!["program", "daftar"].includes(json?.page_type) || isBlocked(url)) return [];
   const official = isOfficial(url);
-  return array(json.scholarships, FC_MAX_PER_PAGE).map((item) => toEntry(item, markdown, normalizeUrl(url), official)).filter(Boolean);
+  return array(json.scholarships, FC_MAX_PER_PAGE).map((item) => toEntry(item, markdown, normalizeUrl(url), official)).filter((entry) => entry !== null);
 }
 
 const quoteCount = (e) => Object.values(e.evidence).filter((quote) => typeof quote === "string" && quote).length + e.evidence.kriteria.length;
@@ -406,7 +408,7 @@ export function pickPages(searchResults, limit) {
   const seen = new Set();
   let duplicates = 0;
   let blocked = 0;
-  const kept = [];
+  const kept: { url: string }[] = [];
   for (const r of searchResults) {
     if (isBlocked(r?.url)) { blocked += 1; continue; }
     const key = normalizeUrl(r.url).replace(/\/$/, "");
