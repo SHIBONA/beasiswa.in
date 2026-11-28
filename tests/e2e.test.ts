@@ -66,18 +66,14 @@ Asisten Laboratorium Sistem Tenaga Listrik 2024
 Bahasa Inggris: IELTS Academic 6.0 (2026)
 Teknis: IoT, embedded system, machine learning dasar`;
 
-test("local HTTP security headers protect the page and private API", async () => {
-  const page = await fetch(ORIGIN);
-  assert.equal(page.status, 200);
-  const csp = page.headers.get("content-security-policy") ?? "";
-  assert.match(csp, /script-src 'self'(?:;|$)/);
-  assert.match(csp, /worker-src 'self'/);
-  assert.match(csp, /frame-ancestors 'none'/);
-  assert.equal(page.headers.get("x-content-type-options"), "nosniff");
-  assert.equal(page.headers.get("referrer-policy"), "no-referrer");
+test("API responses carry security headers and serve no pages", async () => {
   const profile = await fetch(BASE + "/profile");
+  assert.equal(profile.headers.get("content-security-policy"), "default-src 'none'; frame-ancestors 'none'");
+  assert.equal(profile.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(profile.headers.get("referrer-policy"), "no-referrer");
   assert.equal(profile.headers.get("cross-origin-resource-policy"), "same-origin");
   assert.equal(profile.headers.get("cache-control"), "no-store");
+  assert.equal((await fetch(ORIGIN)).status, 404);
 });
 
 test("browser-origin restrictions block foreign requests and keep normal access", async () => {
@@ -116,8 +112,7 @@ test("API rejects malformed bodies, oversized input and undefined routes", async
   assert.equal((await call("/cv/parse/extra", "POST", { text: CV })).status, 404);
   assert.equal((await fetch(ORIGIN + "/data.json")).status, 404);
   assert.equal((await fetch(ORIGIN + "/data.sqlite")).status, 404);
-  assert.equal((await fetch(ORIGIN + "/app.js", { method: "POST" })).status, 405);
-  assert.equal((await fetch(ORIGIN + "/app.js", { method: "HEAD" })).status, 200);
+  assert.equal((await fetch(ORIGIN + "/app.js")).status, 404);
 });
 
 test("member flow: CV → profile → search → results → coach → before/after → save → quota → failure → history", async () => {

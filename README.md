@@ -8,14 +8,24 @@ Gunakan [Bun](https://bun.sh) 1.4+.
 
 ```bash
 bun install --frozen-lockfile
+bun run build            # build front-end Next.js di web/
 bun start                # mode DEMO jika tidak ada API key
 # buka http://localhost:3000 (server mendengarkan di 127.0.0.1)
 ```
 
+Untuk pengembangan, `bun run dev` menjalankan API dan `next dev` sekaligus. Front-end memakai port `PORT` (bawaan 3000). Server API memakai `API_PORT` (bawaan 3001) dan hanya diakses lewat proxy front-end.
+
+Struktur:
+
+- `src/`: server API (Bun, SQLite, agen pencarian, skor, Sesuaikan CV).
+- `web/`: front-end Next.js 16, Tailwind CSS, dan shadcn/ui. `web/proxy.ts` meneruskan `/api` ke server API.
+- `shared/`: tipe data dan helper yang dipakai bersama oleh `src/` dan `web/`.
+- `scripts/start.ts`: menjalankan server API dan front-end bersama.
+
 Mode LIVE (agen Claude sungguhan, cari di web):
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... bun src/server.ts      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; bun src/server.ts
+ANTHROPIC_API_KEY=sk-ant-... bun start      # PowerShell: $env:ANTHROPIC_API_KEY="sk-ant-..."; bun start
 ```
 
 Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.example .env` di PowerShell), isi `FIRECRAWL_API_KEY` dengan key akun Anda, lalu jalankan ulang aplikasi. Mode Firecrawl aktif otomatis. Aplikasi menjalankan 5 kueri, memeriksa maksimal 10 halaman, mencocokkan kutipan dengan teks sumber, menghitung skor, lalu mencari artikel awardee untuk maksimal 5 program. Data hasil ekstraksi dapat dipakai ulang jika sumber diperiksa dalam 24 jam terakhir. Kartu menampilkan tanggal pemeriksaan saat tersedia. Kueri pencarian tetap memakai Firecrawl.
@@ -34,7 +44,7 @@ Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.exampl
 | + Upload CV | ✅ PDF → kolom profil terisi otomatis. PDF dibaca di browser dengan PDF.js dari dependensi lokal. Teks diproses di server lokal tanpa dikirim ke AI. |
 | S2 Mulai pencarian + catatan | ✅ API balas `202` + `search_id`, jalan di background |
 | S3 Status live | ✅ polling 1,2 dtk, langkah agen tampil satu per satu |
-| S4 Hasil berskor | ✅ hingga 30 program dengan alasan kecocokan dan tautan sumber. Firecrawl menampilkan beasiswa dengan bukti jenjang dan negara tujuan, bukti mulai pendaftaran atau status sedang buka, serta batas pendaftaran yang belum lewat. Jika belum ada yang memenuhi, hasil kosong. |
+| S4 Hasil berskor | ✅ hingga 30 program dengan alasan kecocokan dan tautan sumber. Firecrawl menampilkan beasiswa dengan bukti jenjang, negara tujuan, tanggal mulai atau status pendaftaran, dan tanggal tutup. Yang sedang buka tampil lebih dulu. Yang belum buka atau sudah tutup tetap tampil dengan label jadwal, dan label dihitung ulang setiap kali hasil dibuka. Langkah agen menjelaskan bukti yang kurang di tiap halaman. |
 | S5 Simpan | ✅ satu bookmark per program lintas pencarian. Sesuaikan CV tetap tersedia setelah riwayat asal dihapus. |
 | S6 Riwayat | ✅ urut terbaru + hapus riwayat (privasi) |
 | S7 Kuota | ✅ 5 pencarian berhasil/hari, 1 berjalan, maksimal 10 percobaan berbayar/hari → `429` + `Retry-After` |
@@ -43,8 +53,8 @@ Untuk mode **Firecrawl**, salin `.env.example` ke `.env` (`Copy-Item .env.exampl
 
 ## Batas akses dan data
 
-- Jalankan untuk penggunaan lokal. API membatasi host dan origin browser. Aplikasi ini berbagi satu profil lokal tanpa akun, sehingga akses publik melalui proxy atau tunnel memerlukan autentikasi dan penyimpanan terisolasi per pengguna.
-- Aset JavaScript dan worker PDF dilayani dari origin aplikasi. Kebijakan CSP membatasi skrip dan koneksi ke origin sendiri, serta melarang pemuatan aplikasi dalam frame. CV dibatasi 5 MB, 15 halaman, 30.000 karakter, dan 15 detik pembacaan dokumen.
+- Jalankan untuk penggunaan lokal. Front-end dan API sama-sama membatasi host dan origin browser. Aplikasi ini berbagi satu profil lokal tanpa akun, sehingga akses publik melalui proxy atau tunnel memerlukan autentikasi dan penyimpanan terisolasi per pengguna.
+- Aset JavaScript dan worker PDF dilayani dari origin aplikasi. Setiap halaman mendapat CSP dengan nonce baru yang membatasi skrip dan koneksi ke origin sendiri, serta melarang pemuatan aplikasi dalam frame. CV dibatasi 5 MB, 15 halaman, 30.000 karakter, dan 15 detik pembacaan dokumen.
 - Penyedia web menerima jenjang, kategori negara/bidang yang dikenali, dan preferensi umum pendanaan. IPK, skor bahasa, teks CV, prestasi, dan catatan bebas dipakai di aplikasi lokal. Jika negara belum dikenali, pencarian web memakai kueri umum.
 - URL penyedia diperiksa format dan domainnya. Label sumber didasarkan pada domain institusi atau penyelenggara yang dikenal. Kutipan yang ditemukan di halaman tetap perlu dibaca dalam konteks program dan periode.
 - Simpan API key di `.env` lokal. Git mengecualikan file ini, database lokal, dan hasil tes browser.
@@ -73,6 +83,6 @@ bun run test:browser
 bun audit
 ```
 
-Tes browser memakai profil fiktif dan server demo dengan penyimpanan terpisah di `.e2e/`. Jalankan dengan `BEASISWA_TEST_MOBILE=1` untuk viewport 375 × 812. Tes API memakai proses server dan penyimpanan sementara sendiri.
+`bun run test:browser` membangun front-end lebih dulu, lalu menjalankan server API dan Next.js dalam mode demo dengan profil fiktif dan penyimpanan terpisah di `.e2e/`. Jalankan dengan `BEASISWA_TEST_MOBILE=1` untuk viewport 375 × 812. Tes API memakai proses server dan penyimpanan sementara sendiri.
 
 Workflow **Verification** menjalankan audit dependensi, tes unit dan HTTP, serta tes Chromium desktop dan seluler saat ada pull request atau push ke `main`. Pengujian di GitHub Actions memakai mode demo tanpa API key.

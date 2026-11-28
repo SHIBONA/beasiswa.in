@@ -7,3 +7,8 @@ data.json.tmp-*
 *.sqlite-*
 node_modules/
 .e2e/
+
+# Extraction eval: scraped third-party pages and run outputs stay local
+eval/extraction/pages/
+eval/extraction/baseline/
+eval/extraction/results/

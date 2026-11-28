@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyAchievement, discoveryCountries, matchCatalog, rankScholarships } from "../src/catalog.ts";
+import { MAX_RESULTS, classifyAchievement, discoveryCountries, matchCatalog, rankScholarships } from "../src/catalog.ts";
 import { collectSeenUrls, discoveryPreferences, firecrawlQueries, parseFinalJson, runSearch, searchProfile, validateResults } from "../src/agent.ts";
 import { checkQuota, validateProfile } from "../src/server.ts";
 import { extractCvHeuristic, redact } from "../src/cv.ts";
-import { pickPages, toEntries } from "../src/agent.ts";
-import { isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
+import { missingEvidence, pickPages, toEntries, withHeadingDegree } from "../src/agent.ts";
+import { isBlocked, isOfficial, publicWebUrl, verifyQuote } from "../src/firecrawl.ts";
 import { coachFor, previewFor } from "../src/coach.ts";
+import { FIELD_COURSES, OPPORTUNITIES, developmentPlan } from "@beasiswa/shared";
 import { CATALOG } from "../src/catalog.ts";
 import { openStore } from "../src/storage.ts";
 
@@ -22,6 +23,48 @@ test("verifyQuote accepts only sentences that are on the page", () => {
   assert.ok(verifyQuote("Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00", PAGE));
   assert.equal(verifyQuote("IPK minimal 3,50 untuk semua jenjang", PAGE), "");
   assert.equal(verifyQuote("IPK", PAGE), "");
+});
+
+test("evidence checks read quotes with markdown emphasis like plain text", () => {
+  const page = `# Beasiswa Contoh Jepang
+Program ini membiayai studi di jenjang _master_ untuk mahasiswa Indonesia.
+Studi berlangsung *di Jepang* selama dua tahun.
+Pendaftaran dibuka 1 November 2026.
+Batas pendaftaran 31 Januari 2027.`;
+  const [entry] = toEntries({ page_type: "program", scholarships: [{
+    name: "Beasiswa Contoh Jepang", levels: ["S2"], countries: ["jepang"], funding: "Penuh", application_status: "open",
+    level_quote: "Program ini membiayai studi di jenjang _master_ untuk mahasiswa Indonesia.",
+    location_quote: "Studi berlangsung *di Jepang* selama dua tahun.",
+    opens_at: "2026-11-01", opens_at_quote: "Pendaftaran dibuka 1 November 2026.",
+    deadline: "2027-01-31", deadline_quote: "Batas pendaftaran 31 Januari 2027.",
+  }] }, page, "https://www.example.ac.jp/beasiswa");
+  assert.equal(missingEvidence(entry, "program", "S2", ["jepang"]), "");
+  assert.equal(missingEvidence({ ...entry, evidence: { ...entry.evidence, deadline: "" } }, "program", "S2", ["jepang"]), "tanggal tutup tidak terkutip lengkap");
+});
+
+test("a heading that names the program and degree stands in for a quote without the degree", () => {
+  const page = `# Beasiswa MEXT Program Research Students (S2/S3) 2027
+Research Student Enrollment Spring : 2 tahun (April 2027 – Maret 2029)
+## Persyaratan
+Mahasiswa peneliti belajar di universitas pascasarjana di Jepang.`;
+  const [entry] = toEntries({ page_type: "program", scholarships: [{
+    name: "Beasiswa MEXT Program Research Students (S2/S3) 2027", levels: [], countries: ["jepang"],
+    level_quote: "Research Student Enrollment Spring : 2 tahun (April 2027 – Maret 2029)",
+  }] }, page, "https://www.id.emb-japan.go.jp/itpr_id/sch_rs.html");
+  const fixed = withHeadingDegree(entry, page, "program", "S2");
+  assert.equal(fixed.evidence.jenjang, "Beasiswa MEXT Program Research Students (S2/S3) 2027");
+  assert.deepEqual(fixed.levels, ["S2"]);
+  assert.equal(withHeadingDegree(entry, page, "program", "S1"), entry, "no heading names S1");
+  const other = toEntries({ page_type: "daftar", scholarships: [{ name: "Beasiswa Lain", levels: ["S2"], level_quote: "Persyaratan" }] }, page, "https://example.com/x")[0];
+  assert.equal(withHeadingDegree(other, page, "daftar", "S2").evidence.jenjang, "", "a list page heading of another program is not evidence");
+});
+
+test("verifyQuote ignores quote marks and ellipses the extractor puts around a quote", () => {
+  const sentence = "Pendaftar jenjang Magister wajib memiliki IPK sekurang-kurangnya 3,00";
+  assert.equal(verifyQuote(`"${sentence}"`, PAGE), sentence);
+  assert.equal(verifyQuote(`“${sentence}”`, PAGE), sentence);
+  assert.equal(verifyQuote(`... ${sentence} …`, PAGE), sentence);
+  assert.equal(verifyQuote(`"Pendaftar jenjang Magister ... sekurang-kurangnya 3,00"`, PAGE), "");
 });
 
 test("toEntries keeps verified quotes, splits list pages, rejects non-scholarship pages", () => {
@@ -52,6 +95,11 @@ test("pickPages drops duplicates and social media, official sites first", () => 
   assert.equal(duplicates, 1);
   assert.equal(blocked, 1);
   assert.deepEqual(pages.map((p) => p.url), ["https://lpdp.kemenkeu.go.id/a/", "https://www.chevening.org/scholarships", "https://blog.example.com/beasiswa"]);
+});
+
+test("social media hosts are blocked, including Threads on its current domain", () => {
+  for (const url of ["https://www.threads.com/@akun/post/abc", "https://threads.net/@akun", "https://m.facebook.com/x"]) assert.equal(isBlocked(url), true, url);
+  assert.equal(isBlocked("https://www.studyinjapan.go.jp/en/"), false);
 });
 
 test("discovery sends only recognised scholarship categories to providers", () => {
@@ -95,7 +143,7 @@ test("malformed provider items are skipped or reduced to bounded facts", () => {
   assert.equal(result.funding, "Tidak tertulis");
 });
 
-test("Firecrawl only returns evidenced, open scholarships for the target degree and country", async (t) => {
+test("Firecrawl shows evidenced scholarships for the target degree and country, open ones first and the rest labelled", { timeout: 20_000 }, async (t) => {
   const providerKey = process.env.FIRECRAWL_API_KEY;
   process.env.FIRECRAWL_API_KEY = "test-fixture-never-used";
   t.after(() => {
@@ -158,9 +206,16 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
     cache.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  const output = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
-  assert.deepEqual(output.usage, { firecrawl_searches: 6, firecrawl_pages: 1 });
-  assert.equal(output.results.length, 1);
+  const steps: string[] = [];
+  const output = await runSearch(targetProfile, notes, (step) => steps.push(step), "2026-11-26", cache);
+  assert.deepEqual(output.usage, { firecrawl_searches: 9, firecrawl_pages: 1 });
+  assert.equal(output.results[0].name, "Program LPDP");
+  assert.deepEqual(Object.fromEntries(output.results.map((r) => [r.name, r.limits])), {
+    "Program LPDP": [],
+    "Beasiswa Expired": ["Deadline periode ini lewat, pantau periode berikutnya"],
+    "Beasiswa Upcoming": ["Pendaftaran baru dibuka 29 November 2026"],
+    "Beasiswa Tutup Dini": ["Pendaftaran periode ini sudah ditutup, pantau periode berikutnya"],
+  });
   assert.deepEqual(output.results[0].program.levels, ["S1", "S2"]);
   const discovery = requests.filter((r) => r.path === "/v2/search" && !r.body.query.includes("awardee"));
   assert.ok(discovery.every((r) => /S2|master/i.test(r.body.query)));
@@ -172,13 +227,19 @@ test("Firecrawl only returns evidenced, open scholarships for the target degree 
   cache = openStore(path, legacy);
   const repeated = await runSearch(targetProfile, notes, () => {}, "2026-11-26", cache);
   assert.equal(repeated.usage?.firecrawl_pages, 0);
-  assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2"]);
+  assert.deepEqual(repeated.results.map((r) => r.level), ["S1/S2", "S1/S2", "S1/S2", "S1/S2"]);
   assert.equal(repeated.results[0].program.source_checked_at, output.results[0].program.source_checked_at);
   assert.equal(requests.filter((request) => request.path === "/v2/scrape").length, 1);
-  const empty = await runSearch(targetProfile, notes, () => {}, "2026-11-27", cache);
-  assert.deepEqual(empty.results, []);
-  assert.equal(empty.usage?.firecrawl_pages, 0);
-  assert.equal(empty.usage?.firecrawl_searches, 5);
+  const laterSteps: string[] = [];
+  const later = await runSearch(targetProfile, notes, (step) => laterSteps.push(step), "2026-11-27", cache);
+  assert.ok(later.results.every((r) => r.limits.length === 1));
+  assert.deepEqual(later.results.find((r) => r.name === "Program LPDP")?.limits, ["Deadline periode ini lewat, pantau periode berikutnya"]);
+  const pageStep = steps.find((step) => step.startsWith("Membaca lpdp.kemenkeu.go.id"));
+  assert.match(pageStep ?? "", /8 lainnya kurang bukti: 2 lokasi studi tidak terbukti, .*1 tanpa bukti beasiswa atau bantuan biaya$/);
+  assert.ok(steps.includes("3 kandidat berbukti belum buka atau sudah tutup per 2026-11-26; tetap ditampilkan dengan label jadwal pendaftaran"));
+  assert.ok(laterSteps.includes("4 kandidat berbukti belum buka atau sudah tutup per 2026-11-27; tetap ditampilkan dengan label jadwal pendaftaran"));
+  assert.equal(later.usage?.firecrawl_pages, 0);
+  assert.equal(later.usage?.firecrawl_searches, 9);
   assert.doesNotMatch(JSON.stringify(requests), /catatan-pribadi|localhost/);
 });
 
@@ -230,15 +291,18 @@ const profile = { jenjang_saat_ini: "S1", jenjang_tujuan: "S2", prodi: "Teknik E
 
 test("demo matcher shows eligible programs first, limited ones after with labels", () => {
   const { results, eligible } = matchCatalog(profile, "fully funded Jepang", "2026-11-26");
-  assert.equal(results.length, 24);
+  assert.ok(CATALOG.length > MAX_RESULTS);
+  assert.equal(results.length, MAX_RESULTS);
   const ok = results.slice(0, eligible);
   const limited = results.slice(eligible);
   assert.ok(ok.every((r) => r.limits.length === 0 && r.level.split("/").includes("S2") && r.deadline >= "2026-11-26"));
   assert.ok(limited.length > 0 && limited.every((r) => r.limits.length > 0));
   assert.deepEqual(ok.map((r) => r.score), [...ok.map((r) => r.score)].sort((a, b) => b - a));
   assert.equal(results[0].name, "MEXT Research Student Scholarship");
-  const kip = results.find((r) => r.name.startsWith("KIP"));
-  assert.ok(kip);
+  // A program for another degree keeps its card, labelled and penalised (checked on its own: the display cap may cut it).
+  const kipProgram = CATALOG.find((x) => x.name.startsWith("KIP"));
+  assert.ok(kipProgram);
+  const [kip] = rankScholarships(profile, "fully funded Jepang", [kipProgram], "2026-11-26").results;
   assert.deepEqual(kip.limits, ["Bukan untuk S2"]);
   assert.ok(kip.breakdown.some((b) => b.key === "penalti" && b.points === -30));
 });
@@ -364,4 +428,26 @@ test("coach: says honestly when wording cannot help", () => {
   const c = coachFor({ ...profile, prestasi: strong }, "", LPDP);
   assert.equal(c.cv_edits.length, 0);
   assert.match(c.cv_note, /sudah/);
+});
+
+test("catalog and opportunity links are public https pages, and program names are unique", () => {
+  for (const { title, url } of [...OPPORTUNITIES, ...FIELD_COURSES]) {
+    assert.ok(url === "" || (url.startsWith("https://") && publicWebUrl(url)), `${title}: ${url}`);
+  }
+  for (const s of CATALOG) assert.ok(s.url.startsWith("https://") && publicWebUrl(s.url), `${s.name}: ${s.url}`);
+  assert.equal(new Set(CATALOG.map((s) => s.name)).size, CATALOG.length);
+});
+
+test("development plan starts a beginner with first experience, English and field courses", () => {
+  const beginner = { ...profile, prestasi: "", skor_bahasa: 0, negara_tujuan: "Jepang", prodi: "Teknik Elektro", bidang_minat: "IoT" };
+  const plan = developmentPlan(beginner);
+  assert.deepEqual(plan.map((step) => step.area), ["Pengalaman pertama", "Skor bahasa", "Bahasa negara tujuan", "Sertifikat sesuai bidangmu", "Riset dan pengalaman kerja"]);
+  assert.ok(plan[0].items.some((o) => o.kind === "lomba") && plan[0].items.some((o) => o.kind === "relawan"));
+  assert.ok(plan[1].items.every((o) => o.area === "bahasa" && !o.language));
+  assert.ok(plan[2].items.every((o) => o.language === "jepang"));
+  assert.ok(plan[3].items.some((o) => o.title === "Cisco Networking Academy"));
+
+  const ready = { ...profile, jenjang_tujuan: "S1", skor_bahasa: 7, negara_tujuan: "Australia", prodi: "Sastra", bidang_minat: "",
+    prestasi: "Juara 1 debat nasional; Ketua himpunan; Relawan mengajar" };
+  assert.deepEqual(developmentPlan(ready), []);
 });

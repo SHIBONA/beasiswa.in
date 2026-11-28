@@ -1,7 +1,7 @@
 // Firecrawl client (search + scrape with JSON extraction). Needs FIRECRAWL_API_KEY.
 // Every quote the extractor returns is checked against the page markdown before it is shown.
 import { CATALOG } from "./catalog.ts";
-import { publicWebUrl } from "../public/web-url.mjs";
+import { publicWebUrl, type SearchHit } from "@beasiswa/shared";
 export { publicWebUrl };
 
 const API = "https://api.firecrawl.dev/v2";
@@ -12,7 +12,7 @@ const MIN_QUOTE_CHARS = 12;
 export type Raw = Record<string, unknown>;
 export const record = (value: unknown): Raw => typeof value === "object" && value !== null && !Array.isArray(value) ? value as Raw : {};
 
-const BLOCKED_HOSTS = ["facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com", "threads.net", "youtube.com", "linkedin.com", "scribd.com", "reddit.com", "quora.com", "pinterest.com"];
+const BLOCKED_HOSTS = ["facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com", "threads.com", "threads.net", "youtube.com", "linkedin.com", "scribd.com", "reddit.com", "quora.com", "pinterest.com"];
 export const hostOf = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const hostMatches = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
 const ORGANISERS = new Set([...CATALOG.map((s) => hostOf(s.url)), "daad.de", "europa.eu", "fulbrightprogram.org", "emb-japan.go.jp"]);
@@ -73,7 +73,7 @@ async function readResponse(response: Response) {
   }
 }
 
-export type SearchHit = { url: string; title: string; description: string };
+export type { SearchHit };
 
 export async function search(query: string, limit: number): Promise<SearchHit[]> {
   const { data } = await call("/search", { query, limit, location: "Indonesia" });
@@ -86,6 +86,15 @@ export async function search(query: string, limit: number): Promise<SearchHit[]>
       description: typeof r.description === "string" ? r.description.slice(0, 400) : "",
     }] : [];
   }) : [];
+}
+
+// Page text only, without extraction; eval/extraction stores pages with it so models can be compared offline.
+export async function scrapeMarkdown(url: string) {
+  if (isBlocked(url)) throw new Error("URL sumber tidak diizinkan.");
+  const { data } = await call("/scrape", { url, onlyMainContent: true, formats: ["markdown"] });
+  const finalUrl = publicWebUrl(data?.metadata?.url ?? data?.metadata?.sourceURL ?? url);
+  if (!finalUrl || isBlocked(finalUrl.href)) throw new Error("URL akhir sumber tidak diizinkan.");
+  return { markdown: typeof data?.markdown === "string" ? data.markdown : "", finalUrl: finalUrl.href };
 }
 
 export async function scrapeJson(url: string, schema: object, prompt: string) {
@@ -116,9 +125,13 @@ export async function pool<T, R extends object>(items: T[], limit: number, task:
 
 const clean = (text: unknown) => String(text ?? "").normalize("NFKC").toLowerCase().replace(/[*_`#|>\\[\]()]/g, " ").replace(/\s+/g, " ").trim();
 
+// The extractor often wraps a quote in quote marks or trims it with an ellipsis; neither is page text.
+const unwrap = (quote: string) => quote.replace(/^(?:\s|["“”'‘’「『]|\.{3}|…)+|(?:\s|["“”'‘’」』]|\.{3}|…)+$/g, "");
+
 // A quote counts only if it is really on the page (anti-hallucination, PRD risk 11).
 export function verifyQuote(quote: unknown, markdown: string) {
   if (typeof quote !== "string" || quote.length > 1000) return "";
-  const q = clean(quote);
-  return q.length >= MIN_QUOTE_CHARS && clean(markdown).includes(q) ? String(quote).trim() : "";
+  const text = unwrap(quote);
+  const q = clean(text);
+  return q.length >= MIN_QUOTE_CHARS && clean(markdown).includes(q) ? text : "";
 }

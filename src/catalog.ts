@@ -1,58 +1,12 @@
-// Demo-mode catalog: real programs and official sites, but deadlines and thresholds are
-// EXAMPLE values for the demo video. Live mode (ANTHROPIC_API_KEY set) searches the web instead.
-// values = what the program rewards in achievements: riset, kompetisi, kepemimpinan, akademik, sosial.
+import type { BreakdownRow, Criterion, Evidence, Insight, Profile, RankedResult, Scholarship, ScoredAchievement } from "@beasiswa/shared";
+export type { BreakdownRow, Criterion, Evidence, Insight, Profile, RankedResult, Scholarship };
 
-// The member's saved profile, as validated by the server.
-export type Profile = {
-  jenjang_saat_ini: string; jenjang_tujuan: string; prodi: string; ipk: number; semester: number;
-  negara_tujuan: string; bidang_minat: string; skor_bahasa: number; prestasi: string; butuh_pendanaan: boolean;
-};
-export type Criterion = { text: string; quote: string };
-// Sentences verified on the official page (Firecrawl mode); empty when not found.
-export type Evidence = {
-  jenjang: string; lokasi: string; pembukaan: string; ipk: string; bahasa: string;
-  deadline: string; pendanaan: string; kerja: string; kriteria: Criterion[];
-};
-// Program facts from the demo catalog or extracted from the web; the scorer reads only these.
-export type Scholarship = {
-  name: string; provider: string; country: string; countries: string[]; levels: string[]; funding: string;
-  deadline: string; url: string; requirements: string; fields: string[]; values: string[];
-  min_gpa?: number; ielts?: number; min_sem?: number; max_sem?: number; work_years?: number; need_based?: boolean;
-  evidence?: Evidence; official?: boolean; source?: string;
-  opens_at?: string; application_status?: string; source_checked_at?: string;
-};
-
-export const CATALOG: Scholarship[] = [
-  { name: "Beasiswa LPDP Reguler", provider: "LPDP, Kementerian Keuangan RI", country: "Indonesia & luar negeri", countries: ["indonesia", "jepang", "inggris", "australia", "jerman", "amerika serikat", "belanda", "korea selatan", "hong kong", "singapura", "tiongkok", "taiwan", "prancis", "swedia", "kanada", "selandia baru"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-03-31", url: "https://lpdp.kemenkeu.go.id/", min_gpa: 3.0, ielts: 6.5, fields: ["semua"], values: ["kepemimpinan", "sosial", "riset"], requirements: "IPK min 3,00 (S2); IELTS 6.5 untuk luar negeri; kampus tujuan ada di daftar PT LPDP; komitmen kembali ke Indonesia." },
-  { name: "MEXT Research Student Scholarship", provider: "Kedutaan Besar Jepang di Indonesia", country: "Jepang", countries: ["jepang"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-04-15", url: "https://www.id.emb-japan.go.jp/sch.html", min_gpa: 3.0, ielts: 6.0, fields: ["semua"], values: ["riset", "akademik"], requirements: "Usia < 35 tahun; IPK min 3,00; rencana riset; ujian tulis Bahasa Inggris/Jepang." },
-  { name: "Chevening Scholarship", provider: "Pemerintah Inggris (FCDO)", country: "Inggris", countries: ["inggris"], levels: ["S2"], funding: "Penuh", deadline: "2027-11-04", url: "https://www.chevening.org/scholarships/", min_gpa: 3.0, ielts: 6.5, work_years: 2, fields: ["semua"], values: ["kepemimpinan", "sosial"], requirements: "Pengalaman kerja min 2 tahun; daftar 3 program studi di Inggris; potensi kepemimpinan." },
-  { name: "Australia Awards Scholarships", provider: "Pemerintah Australia (DFAT)", country: "Australia", countries: ["australia"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-04-30", url: "https://www.australiaawardsindo.or.id/", min_gpa: 2.9, ielts: 5.5, fields: ["semua"], values: ["kepemimpinan", "sosial"], requirements: "IPK min 2,90; IELTS 5.5 (atau setara); bidang prioritas pembangunan Indonesia." },
-  { name: "DAAD Development-Related Postgraduate Courses", provider: "DAAD", country: "Jerman", countries: ["jerman"], levels: ["S2"], funding: "Penuh", deadline: "2027-08-31", url: "https://www.daad.id/", min_gpa: 3.0, ielts: 6.5, work_years: 2, fields: ["teknik", "ekonomi", "lingkungan", "kesehatan", "pendidikan", "energi"], values: ["riset", "sosial"], requirements: "Pengalaman kerja min 2 tahun; gelar S1 maks 6 tahun lalu; IELTS 6.5." },
-  { name: "Fulbright Master's Degree Program", provider: "AMINEF", country: "Amerika Serikat", countries: ["amerika serikat"], levels: ["S2"], funding: "Penuh", deadline: "2027-02-15", url: "https://www.aminef.or.id/", min_gpa: 3.0, ielts: 6.5, fields: ["semua"], values: ["kepemimpinan", "akademik", "riset"], requirements: "IPK min 3,00; TOEFL ITP 550 / IELTS 6.5; esai studi dan tujuan pribadi." },
-  { name: "Global Korea Scholarship (GKS)", provider: "NIIED, Pemerintah Korea Selatan", country: "Korea Selatan", countries: ["korea selatan"], levels: ["S1", "S2", "S3"], funding: "Penuh", deadline: "2027-03-10", url: "https://www.studyinkorea.go.kr/", min_gpa: 3.2, fields: ["semua"], values: ["akademik", "riset"], requirements: "IPK min 80% skala nilai (~3,20); usia < 40 tahun; TOPIK jadi nilai tambah." },
-  { name: "Erasmus Mundus Joint Masters", provider: "Uni Eropa", country: "Eropa (multi-negara)", countries: ["belanda", "jerman", "prancis", "spanyol", "italia", "swedia", "eropa"], levels: ["S2"], funding: "Penuh", deadline: "2027-01-15", url: "https://www.eacea.ec.europa.eu/scholarships/erasmus-mundus-catalogue_en", min_gpa: 3.0, ielts: 6.5, fields: ["semua"], values: ["akademik", "riset"], requirements: "Daftar langsung ke konsorsium program; IELTS 6.5 umumnya; tenggat berbeda tiap program." },
-  { name: "IISMA (Indonesian International Student Mobility Awards)", provider: "Kemendikbudristek", country: "Luar negeri (exchange)", countries: ["inggris", "amerika serikat", "jepang", "korea selatan", "australia", "jerman", "belanda", "hong kong", "singapura"], levels: ["Exchange S1"], funding: "Penuh", deadline: "2027-02-28", url: "https://iisma.kemdikbud.go.id/", min_gpa: 3.0, ielts: 6.0, min_sem: 4, max_sem: 6, fields: ["semua"], values: ["akademik", "kepemimpinan"], requirements: "Mahasiswa S1 semester 4–6; IPK min 3,00; IELTS 6.0 / TOEFL iBT 80." },
-  { name: "Beasiswa Unggulan", provider: "Kemendikbudristek", country: "Indonesia", countries: ["indonesia"], levels: ["S1", "S2"], funding: "Penuh", deadline: "2027-06-30", url: "https://beasiswaunggulan.kemdikbud.go.id/", min_gpa: 3.25, fields: ["semua"], values: ["kompetisi", "akademik", "riset"], requirements: "IPK min 3,25 (S1 on-going); prestasi nasional/internasional; esai kontribusi." },
-  { name: "Beasiswa Pendidikan Indonesia (BPI)", provider: "Puslapdik Kemendikbudristek", country: "Indonesia & luar negeri", countries: ["indonesia", "inggris", "australia", "amerika serikat", "belanda", "jepang", "hong kong"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-05-15", url: "https://beasiswa.kemdikbud.go.id/", min_gpa: 3.25, ielts: 6.5, fields: ["semua"], values: ["akademik", "riset", "kompetisi"], requirements: "IPK min 3,25; IELTS 6.5 untuk luar negeri; LoA atau sedang mendaftar kampus tujuan." },
-  { name: "KIP Kuliah Merdeka", provider: "Kemendikbudristek", country: "Indonesia", countries: ["indonesia"], levels: ["S1"], funding: "Penuh", need_based: true, deadline: "2027-07-31", url: "https://kip-kuliah.kemdikbud.go.id/", fields: ["semua"], values: ["akademik"], requirements: "Dari keluarga kurang mampu (DTKS/KIP/SKTM); lulusan SMA sederajat maks 3 tahun." },
-  { name: "Djarum Beasiswa Plus", provider: "Djarum Foundation", country: "Indonesia", countries: ["indonesia"], levels: ["S1"], funding: "Sebagian", deadline: "2027-05-31", url: "https://djarumbeasiswaplus.org/", min_gpa: 3.0, min_sem: 4, max_sem: 4, fields: ["semua"], values: ["kepemimpinan", "kompetisi"], requirements: "Mahasiswa S1 semester 4; IPK min 3,00; aktif organisasi; pelatihan soft skill." },
-  { name: "Tanoto Foundation TELADAN", provider: "Tanoto Foundation", country: "Indonesia", countries: ["indonesia"], levels: ["S1"], funding: "Penuh", min_sem: 1, max_sem: 2, deadline: "2027-04-30", url: "https://www.tanotofoundation.org/", min_gpa: 3.0, fields: ["semua"], values: ["kepemimpinan", "sosial"], requirements: "Mahasiswa S1 tahun pertama di kampus mitra; IPK min 3,00; program pengembangan kepemimpinan." },
-  { name: "Stipendium Hungaricum", provider: "Tempus Public Foundation, Hungaria", country: "Hungaria", countries: ["hungaria", "eropa"], levels: ["S1", "S2", "S3"], funding: "Penuh", deadline: "2027-01-15", url: "https://stipendiumhungaricum.hu/", min_gpa: 3.0, ielts: 5.5, fields: ["semua"], values: ["akademik"], requirements: "Nominasi oleh Kemendikbudristek; IELTS 5.5–6.0 tergantung kampus." },
-  { name: "Türkiye Burslari", provider: "Pemerintah Turki", country: "Turki", countries: ["turki"], levels: ["S1", "S2", "S3"], funding: "Penuh", deadline: "2027-02-20", url: "https://www.turkiyeburslari.gov.tr/", min_gpa: 3.0, fields: ["semua"], values: ["akademik", "sosial"], requirements: "Nilai akademik min 75% (S2); usia < 30 tahun untuk S2; wawancara." },
-  { name: "Taiwan ICDF International Higher Education Scholarship", provider: "Taiwan ICDF", country: "Taiwan", countries: ["taiwan"], levels: ["S1", "S2", "S3"], funding: "Penuh", deadline: "2027-03-31", url: "https://www.icdf.org.tw/", min_gpa: 3.0, ielts: 6.0, fields: ["teknik", "informatika", "pertanian", "kesehatan", "bisnis"], values: ["akademik", "riset"], requirements: "IELTS 6.0 / TOEFL iBT 79; program berbahasa Inggris di kampus mitra." },
-  { name: "Chinese Government Scholarship (CSC)", provider: "China Scholarship Council", country: "Tiongkok", countries: ["tiongkok"], levels: ["S1", "S2", "S3"], funding: "Penuh", deadline: "2027-03-15", url: "https://www.campuschina.org/", min_gpa: 3.0, ielts: 6.0, fields: ["semua"], values: ["akademik", "riset"], requirements: "IPK min 3,00; program berbahasa Inggris butuh IELTS 6.0; usia < 35 tahun (S2)." },
-  { name: "Hong Kong PhD Fellowship Scheme (HKPFS)", provider: "Research Grants Council Hong Kong", country: "Hong Kong", countries: ["hong kong"], levels: ["S3"], funding: "Penuh", deadline: "2026-12-01", url: "https://cerg1.ugc.edu.hk/hkpfs/index.html", min_gpa: 3.5, ielts: 6.5, fields: ["semua"], values: ["riset", "akademik", "kompetisi"], requirements: "Calon PhD di universitas Hong Kong; rekam jejak riset kuat; IELTS 6.5." },
-  { name: "Singapore International Graduate Award (SINGA)", provider: "A*STAR, NUS, NTU, SUTD", country: "Singapura", countries: ["singapura"], levels: ["S3"], funding: "Penuh", deadline: "2027-06-01", url: "https://www.a-star.edu.sg/Scholarships/for-graduate-studies/singapore-international-graduate-award-singa", min_gpa: 3.3, ielts: 6.0, fields: ["teknik", "informatika", "sains", "elektro"], values: ["riset", "akademik"], requirements: "PhD bidang sains & teknik; IPK sangat baik; surat rekomendasi riset." },
-  { name: "Manaaki New Zealand Scholarships", provider: "Pemerintah Selandia Baru (MFAT)", country: "Selandia Baru", countries: ["selandia baru"], levels: ["S2", "S3"], funding: "Penuh", deadline: "2027-03-01", url: "https://www.nzscholarships.govt.nz/", min_gpa: 3.0, ielts: 6.5, fields: ["energi", "pertanian", "lingkungan", "kesehatan", "teknik"], values: ["kepemimpinan", "sosial"], requirements: "Bidang prioritas (energi terbarukan, pertanian, dll.); IELTS 6.5; komitmen kembali 2 tahun." },
-  { name: "Orange Tulip Scholarship", provider: "Nuffic Neso Indonesia", country: "Belanda", countries: ["belanda"], levels: ["S1", "S2"], funding: "Sebagian", deadline: "2027-04-01", url: "https://www.nesoindonesia.or.id/", min_gpa: 3.0, ielts: 6.5, fields: ["semua"], values: ["akademik"], requirements: "Diterima di kampus mitra Belanda; IELTS 6.5; potongan biaya kuliah (sebagian/penuh)." },
-  { name: "Swedish Institute Scholarships for Global Professionals", provider: "Swedish Institute", country: "Swedia", countries: ["swedia"], levels: ["S2"], funding: "Penuh", deadline: "2027-02-10", url: "https://si.se/en/apply/scholarships/", min_gpa: 3.0, ielts: 6.5, work_years: 1, fields: ["semua"], values: ["kepemimpinan", "sosial"], requirements: "Pengalaman kerja/kepemimpinan min 3.000 jam; IELTS 6.5." },
-  // Deadline already passed: shows the "deadline lewat dibuang" rule (PRD S4) during the demo.
-  { name: "Beasiswa BCA Finance (periode lalu)", provider: "BCA Finance", country: "Indonesia", countries: ["indonesia"], levels: ["S1"], funding: "Sebagian", deadline: "2026-09-30", url: "https://www.bcafinance.co.id/", min_gpa: 3.0, fields: ["semua"], values: ["akademik"], requirements: "Mahasiswa aktif S1; IPK min 3,00." },
-];
+import { CATALOG } from "./data/catalog.ts";
+export { CATALOG };
 
 export const WEIGHTS: Record<string, number> = { ipk: 25, bahasa: 15, negara: 20, prestasi: 20, bidang: 10, pendanaan: 10 };
 
-const ALIASES = new Map(Object.entries({ hongkong: "hong kong", hk: "hong kong", usa: "amerika serikat", us: "amerika serikat", amerika: "amerika serikat", uk: "inggris", "united kingdom": "inggris", korea: "korea selatan", china: "tiongkok", cina: "tiongkok", singapore: "singapura", japan: "jepang", "new zealand": "selandia baru", nz: "selandia baru", netherlands: "belanda", germany: "jerman", taiwan: "taiwan" }));
+const ALIASES = new Map(Object.entries({ hongkong: "hong kong", hk: "hong kong", usa: "amerika serikat", us: "amerika serikat", amerika: "amerika serikat", uk: "inggris", "united kingdom": "inggris", korea: "korea selatan", china: "tiongkok", cina: "tiongkok", singapore: "singapura", japan: "jepang", "new zealand": "selandia baru", nz: "selandia baru", netherlands: "belanda", germany: "jerman", taiwan: "taiwan", switzerland: "swiss", swiss: "swiss" }));
 const norm = (s: unknown) => String(s ?? "").toLowerCase().trim();
 const country = (c: string) => ALIASES.get(norm(c)) ?? norm(c);
 const list = (s: unknown) => (Array.isArray(s) ? s : String(s ?? "").split(",")).map(norm).filter(Boolean);
@@ -102,7 +56,6 @@ export function classifyAchievement(text: string) {
 export const splitAchievements = (s: unknown) => String(s ?? "").split(/;|\n/).map((x) => x.trim()).filter((x) => x.length > 3);
 
 type Achievement = ReturnType<typeof classifyAchievement>;
-type ScoredAchievement = { text: string; level: string; relevant: string[]; points: number };
 
 function scoreAchievements(items: Achievement[], values: string[]) {
   const scored = items.map((a): ScoredAchievement => {
@@ -118,8 +71,6 @@ export function opensLevel(levels: string[], targetLevel: string) {
   const target = norm(targetLevel);
   return levels.some((level) => target === "exchange" ? norm(level).startsWith("exchange") : norm(level) === target);
 }
-
-export type BreakdownRow = { key: string; label: string; points: number; max: number; detail: string; rule: string; quote: string };
 
 export function scoreScholarship(profile: Profile, notes: string, s: Scholarship) {
   const levelOk = opensLevel(s.levels, profile.jenjang_tujuan);
@@ -204,9 +155,6 @@ export function scoreScholarship(profile: Profile, notes: string, s: Scholarship
   return { score, reasons, gaps, breakdown, achievements: scored, insight: buildInsight(s, breakdown, relevant, values, ev) };
 }
 
-// One selection stage of the program-specific explanation shown on each result card.
-export type Insight = { label: string; ok: boolean; text: string; quotes?: Criterion[] };
-
 export const VALUE_LABELS: Record<string, string> = { riset: "riset & karya ilmiah", kompetisi: "prestasi kompetisi", kepemimpinan: "kepemimpinan", akademik: "prestasi akademik", sosial: "kontribusi sosial" };
 
 // Program-specific explanation by selection stage: administration (hard gates) -> substance -> fit.
@@ -235,12 +183,19 @@ function buildInsight(s: Scholarship, breakdown: BreakdownRow[], relevant: Score
 export const MAX_RESULTS = 30;
 const LOCAL_ONLY = /local students only|for local students|permanent (citizens?|residents?)|hksar permanent|khusus warga (negara )?(lokal|setempat)/i;
 
+const longDate = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
 // Hard limits do not hide a program; they label it and push it below the eligible ones.
-export function limitsOf(s: Scholarship, profile: Profile, today: string) {
+// They depend on the day, so the server recomputes them whenever a saved search is read.
+export function limitsOf(s: Scholarship, targetLevel: string, today: string) {
   const limits: string[] = [];
   if (!s.levels.length) limits.push("Jenjang tidak tertulis");
-  else if (!opensLevel(s.levels, profile.jenjang_tujuan)) limits.push(`Bukan untuk ${profile.jenjang_tujuan}`);
+  else if (!opensLevel(s.levels, targetLevel)) limits.push(`Bukan untuk ${targetLevel}`);
   if (isExpired(s.deadline, today)) limits.push("Deadline periode ini lewat, pantau periode berikutnya");
+  else if (s.application_status === "closed") limits.push("Pendaftaran periode ini sudah ditutup, pantau periode berikutnya");
+  else if (s.opens_at && s.opens_at > today) limits.push(`Pendaftaran baru dibuka ${longDate(s.opens_at)}`);
+  else if (s.application_status === "upcoming") limits.push("Pendaftaran periode ini belum dibuka");
   if (s.official === false) limits.push("Sumber belum terverifikasi sebagai penyelenggara, cek ke situs resmi");
   if (LOCAL_ONLY.test(`${s.name} ${s.requirements ?? ""}`)) limits.push("Tampaknya khusus warga lokal, cek kelayakan WNI");
   return limits;
@@ -251,18 +206,23 @@ export function programIdentity({ name, provider, country }: { name?: unknown; p
   return [name, provider, country].map((value) => String(value ?? "").normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " "));
 }
 
+// Eligible programs first, then limited ones; best score first within each group.
+// Also orders stored results, so it accepts documents saved by older versions.
+type Rankable = { limits?: unknown; score?: unknown };
+const isLimited = (r: Rankable) => Array.isArray(r.limits) && r.limits.length > 0;
+export const byEligibility = (a: Rankable, b: Rankable) =>
+  Number(isLimited(a)) - Number(isLimited(b)) || (Number(b.score) || 0) - (Number(a.score) || 0);
+
 export function rankScholarships(profile: Profile, notes: string, scholarships: Scholarship[], today: string) {
-  const results = scholarships.map((s) => ({
+  const results = scholarships.map((s): RankedResult => ({
     name: s.name, provider: s.provider, country: s.country, level: s.levels.join("/") || "Tidak tertulis", funding: s.funding,
     deadline: s.deadline, requirements: s.requirements, url: s.url, source: s.source ?? "demo",
-    limits: limitsOf(s, profile, today), ...scoreScholarship(profile, notes, s),
+    limits: limitsOf(s, profile.jenjang_tujuan, today), ...scoreScholarship(profile, notes, s),
     program: s, // raw facts, so the CV coach can re-score "what if" profiles later
   }));
   const expired = scholarships.filter((s) => isExpired(s.deadline, today)).length;
-  results.sort((a, b) => Number(a.limits.length > 0) - Number(b.limits.length > 0) || b.score - a.score);
+  results.sort(byEligibility);
   return { results: results.slice(0, MAX_RESULTS), expired, eligible: results.filter((r) => !r.limits.length).length };
 }
-
-export type RankedResult = ReturnType<typeof rankScholarships>["results"][number];
 
 export const matchCatalog = (profile: Profile, notes: string, today: string) => rankScholarships(profile, notes, CATALOG, today);

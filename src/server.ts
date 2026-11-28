@@ -1,10 +1,10 @@
-// Local scholarship search server for one member.
+// Local scholarship API for one member. The web front-end (web/) proxies /api here.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentMode, firecrawlDestinations, hasOpenApplication, runSearch } from "./agent.ts";
+import { agentMode, firecrawlDestinations, runSearch } from "./agent.ts";
+import { byEligibility, limitsOf } from "./catalog.ts";
 import { MAX_CV_CHARS, parseCv } from "./cv.ts";
 import { coachFor, previewFor } from "./coach.ts";
 import type { Profile } from "./catalog.ts";
@@ -19,24 +19,14 @@ try {
 }
 const LEGACY_PATH = process.env.DATA_FILE || join(ROOT, "data.json");
 const DATABASE_PATH = process.env.DATABASE_FILE || (process.env.DATA_FILE ? `${LEGACY_PATH}.sqlite` : join(ROOT, "data.sqlite"));
-const PUBLIC_DIR = join(ROOT, "public");
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT) || 3001;
 const DAILY_QUOTA = 5;
 const DAILY_PROVIDER_ATTEMPTS = 10;
 const RUNNING_RETRY_SECONDS = 15;
 const MAX_BODY_BYTES = 20_000;
 const MAX_CV_BODY_BYTES = 200_000;
-const JS = "text/javascript; charset=utf-8";
-const STATIC_FILES = new Map([
-  ["/", [join(PUBLIC_DIR, "index.html"), "text/html; charset=utf-8"]],
-  ["/index.html", [join(PUBLIC_DIR, "index.html"), "text/html; charset=utf-8"]],
-  ["/app.js", [join(PUBLIC_DIR, "app.js"), JS]],
-  ["/web-url.mjs", [join(PUBLIC_DIR, "web-url.mjs"), JS]],
-  ["/pdf/pdf.mjs", [join(ROOT, "node_modules/pdfjs-dist/build/pdf.mjs"), JS]],
-  ["/pdf/pdf.worker.mjs", [join(ROOT, "node_modules/pdfjs-dist/build/pdf.worker.mjs"), JS]],
-]);
 const SECURITY_HEADERS = {
-  "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+  "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
   "Cross-Origin-Resource-Policy": "same-origin",
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
@@ -213,9 +203,10 @@ async function api(req: IncomingMessage, res: ServerResponse, path: string) {
     const search = activeSearch?.id === id ? activeSearch : store.search(id);
     if (!search) return send(res, 404, { error: "Pencarian tidak ditemukan." });
     if (method === "GET") {
+      // Labels such as "deadline lewat" depend on the day, so they are recomputed on every read.
       const day = applicationDay(search);
-      const results = search.mode === "firecrawl" && Array.isArray(search.target_countries)
-        ? search.results.filter((result) => hasOpenApplication(result.program ?? {}, day))
+      const results = search.target_level
+        ? search.results.map((r) => (r.program ? { ...r, limits: limitsOf(r.program, search.target_level, day) } : r)).sort(byEligibility)
         : search.results;
       return send(res, 200, { search: { ...search, results }, saved_ids: store.savedIds(id) });
     }
@@ -279,21 +270,6 @@ function decodeId(id: string) {
   }
 }
 
-async function serveStatic(req: IncomingMessage, res: ServerResponse, path: string) {
-  const asset = STATIC_FILES.get(path);
-  if (!asset) return send(res, 404, { error: "Halaman tidak ditemukan." });
-  if (req.method !== "GET" && req.method !== "HEAD") return send(res, 405, { error: "Metode tidak didukung." }, { Allow: "GET, HEAD" });
-  const [file, type] = asset;
-  try {
-    const body = await readFile(file);
-    res.writeHead(200, { "Content-Type": type, "Content-Length": body.length, "Cache-Control": "no-cache" });
-    res.end(req.method === "HEAD" ? undefined : body);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    send(res, 404, { error: "Berkas tidak ditemukan." });
-  }
-}
-
 const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, connectionsCheckingInterval: 1_000 }, async (req, res) => {
   for (const [header, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(header, value);
   const host = req.headers.host;
@@ -314,7 +290,7 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
       }
       return await api(req, res, path);
     }
-    return await serveStatic(req, res, path);
+    return send(res, 404, { error: "Halaman ada di aplikasi web, bukan di server API." });
   } catch (caught) {
     const error = caught as PublicError;
     if (!error.status) console.error(`Permintaan gagal (${error.name}).`);
@@ -325,7 +301,7 @@ const server = createServer({ headersTimeout: 10_000, requestTimeout: 20_000, co
 if (process.argv[1] && fileURLToPath(import.meta.url) === normalize(process.argv[1])) {
   server.listen(PORT, "127.0.0.1", () => {
     store = openStore(DATABASE_PATH, LEGACY_PATH);
-    console.log(`Cari Beasiswa (${agentMode()}): http://localhost:${PORT}`);
+    console.log(`API beasiswa.in (${agentMode()}): http://127.0.0.1:${PORT}/api`);
   });
   server.on("close", () => store?.close());
 }

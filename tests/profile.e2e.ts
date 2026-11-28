@@ -3,7 +3,7 @@ import { expect } from 'e2e';
 
 describe('Profil Beasiswa', () => {
   test('autofills profile fields from a local PDF', async ({ app, screen, browser }) => {
-    await app.open('/#/profil');
+    await app.open('/profil');
     await screen.getByRole('button', 'Upload CV (PDF)').waitFor();
 
     await browser.locator('#cvfile').setInputFiles('tests/fixtures/contoh-cv.pdf');
@@ -15,7 +15,7 @@ describe('Profil Beasiswa', () => {
   });
 
   test('keeps the form available after an unreadable CV', async ({ app, screen, browser }) => {
-    await app.open('/#/profil');
+    await app.open('/profil');
     await screen.getByRole('button', 'Upload CV (PDF)').waitFor();
 
     await browser.locator('#cvfile').setInputFiles({
@@ -27,7 +27,7 @@ describe('Profil Beasiswa', () => {
   });
 
   test('renders stored profile text literally after saving', async ({ app, screen, browser }) => {
-    await app.open('/#/profil');
+    await app.open('/profil');
     const major = 'Teknik <Energi> & "Sistem"';
     await screen.getByLabel('Program studi').fill(major);
     await browser.locator('[name=ipk]').fill('3.62');
